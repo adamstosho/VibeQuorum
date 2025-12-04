@@ -44,3 +44,7 @@ coverage/
 *.log
 .cache/
 
+ArchitecturalFlow.md
+PRD.md
+ProjectID.md    
+DesignSystem.md
