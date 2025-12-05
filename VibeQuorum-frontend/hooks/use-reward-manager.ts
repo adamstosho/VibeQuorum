@@ -161,18 +161,18 @@ export function useRewardManager() {
 
   // Parse reward config
   const config: RewardConfig | null = rewardConfigRaw ? {
-    acceptedAnswerReward: parseFloat(formatEther((rewardConfigRaw as bigint[])[0])),
-    upvoteReward: parseFloat(formatEther((rewardConfigRaw as bigint[])[1])),
-    upvoteThreshold: Number((rewardConfigRaw as bigint[])[2]),
-    questionerBonus: parseFloat(formatEther((rewardConfigRaw as bigint[])[3])),
-    maxDailyReward: parseFloat(formatEther((rewardConfigRaw as bigint[])[4])),
-    cooldown: Number((rewardConfigRaw as bigint[])[5]),
+    acceptedAnswerReward: parseFloat(formatEther(Array.from(rewardConfigRaw)[0])),
+    upvoteReward: parseFloat(formatEther(Array.from(rewardConfigRaw)[1])),
+    upvoteThreshold: Number(Array.from(rewardConfigRaw)[2]),
+    questionerBonus: parseFloat(formatEther(Array.from(rewardConfigRaw)[3])),
+    maxDailyReward: parseFloat(formatEther(Array.from(rewardConfigRaw)[4])),
+    cooldown: Number(Array.from(rewardConfigRaw)[5]),
   } : null
 
   // Parse stats
   const stats: RewardStats | null = statsRaw ? {
-    totalDistributed: parseFloat(formatEther((statsRaw as bigint[])[0])),
-    totalAnswersRewarded: Number((statsRaw as bigint[])[1]),
+    totalDistributed: parseFloat(formatEther(Array.from(statsRaw)[0])),
+    totalAnswersRewarded: Number(Array.from(statsRaw)[1]),
   } : null
 
   // Refetch all data

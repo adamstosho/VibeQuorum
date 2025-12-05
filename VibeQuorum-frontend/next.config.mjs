@@ -18,6 +18,13 @@ const nextConfig = {
       }
     }
     
+    // Ignore optional dependencies that aren't needed for web
+    config.resolve.alias = {
+      ...config.resolve.alias,
+      '@react-native-async-storage/async-storage': false,
+      'pino-pretty': false,
+    }
+    
     // Ignore problematic test files from thread-stream
     config.module.rules.push({
       test: /node_modules[\\/]thread-stream[\\/](?:test|LICENSE|README)/,

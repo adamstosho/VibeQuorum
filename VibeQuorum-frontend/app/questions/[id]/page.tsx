@@ -24,6 +24,8 @@ import Link from "next/link"
 import { useWallet } from "@/hooks/use-wallet"
 import { useQuestion, useAnswers, useVoting } from "@/hooks/use-questions"
 import { useRewardManager } from "@/hooks/use-contracts"
+import { useApiAuth } from "@/hooks/use-api-auth"
+import { api } from "@/lib/api"
 import { ConnectButton } from "@rainbow-me/rainbowkit"
 
 export default function QuestionDetailPage() {
@@ -36,10 +38,12 @@ export default function QuestionDetailPage() {
   const { answers, loading: answersLoading, createAnswer, acceptAnswer, addRewardToAnswer } = useAnswers(questionId)
   const { vote, getUserVote } = useVoting(address)
   const { rewardAcceptedAnswer, isPending: rewardPending } = useRewardManager()
+  const { signRequest } = useApiAuth()
   
   const [answerContent, setAnswerContent] = useState("")
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [isAccepting, setIsAccepting] = useState<string | null>(null)
+  const [isGeneratingAI, setIsGeneratingAI] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [showShareToast, setShowShareToast] = useState(false)
 
@@ -95,7 +99,7 @@ export default function QuestionDetailPage() {
       createAnswer({
         content: answerContent.trim(),
         author: address,
-        displayName: shortAddress,
+        displayName: shortAddress || undefined,
         aiGenerated: false,
       })
       
@@ -127,6 +131,44 @@ export default function QuestionDetailPage() {
       console.error("Failed to accept answer:", err)
     } finally {
       setIsAccepting(null)
+    }
+  }
+
+  // Handle AI draft generation
+  const handleGenerateAI = async () => {
+    if (!isConnected || !address) {
+      setError("Please connect your wallet first")
+      return
+    }
+
+    setIsGeneratingAI(true)
+    setError(null)
+
+    try {
+      const auth = await signRequest()
+      if (!auth || !auth.signature || !auth.timestamp) {
+        setError("Failed to sign request. Please try again.")
+        setIsGeneratingAI(false)
+        return
+      }
+
+      const result = await api.ai.generateDraft(
+        questionId,
+        {},
+        address,
+        auth.signature,
+        auth.timestamp
+      )
+
+      if (result?.draft) {
+        setAnswerContent(result.draft)
+      } else {
+        setError("No draft generated. Please try again.")
+      }
+    } catch (err: any) {
+      setError(err.message || "Failed to generate AI draft. Please try again.")
+    } finally {
+      setIsGeneratingAI(false)
     }
   }
 
@@ -432,9 +474,28 @@ export default function QuestionDetailPage() {
               />
 
               <div className="flex items-center justify-between">
-                <p className="text-xs text-muted-foreground">
-                  {answerContent.length} characters • Accepted answers earn VIBE tokens!
-                </p>
+                <div className="flex items-center gap-3">
+                  <button
+                    onClick={handleGenerateAI}
+                    disabled={isGeneratingAI || isSubmitting}
+                    className="btn-secondary gap-2 text-sm disabled:opacity-50"
+                  >
+                    {isGeneratingAI ? (
+                      <>
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        Generating...
+                      </>
+                    ) : (
+                      <>
+                        <Sparkles className="h-4 w-4" />
+                        Generate AI Draft
+                      </>
+                    )}
+                  </button>
+                  <p className="text-xs text-muted-foreground">
+                    {answerContent.length} characters • Accepted answers earn VIBE tokens!
+                  </p>
+                </div>
                 <button
                   onClick={handleSubmitAnswer}
                   disabled={isSubmitting || !answerContent.trim()}

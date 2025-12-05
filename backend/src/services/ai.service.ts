@@ -86,7 +86,8 @@ This file documents all AI prompts and responses used in the VibeQuorum platform
 
     try {
       // Call OpenAI-compatible API (Hugging Face router)
-      const completion = await this.openaiClient.chat.completions.create({
+      // Add timeout wrapper for long-running requests
+      const completionPromise = this.openaiClient.chat.completions.create({
         model: AI_CONFIG.model,
         messages: [
           {
@@ -102,6 +103,13 @@ This file documents all AI prompts and responses used in the VibeQuorum platform
         temperature: options.temperature || AI_CONFIG.temperature,
         top_p: AI_CONFIG.topP,
       });
+
+      // Add timeout (90 seconds for AI generation)
+      const timeoutPromise = new Promise((_, reject) => {
+        setTimeout(() => reject(new Error('AI generation timeout - request took too long')), 90000);
+      });
+
+      const completion = await Promise.race([completionPromise, timeoutPromise]) as any;
 
       const responseTime = Date.now() - startTime;
       let responseText = completion.choices[0]?.message?.content || '';
@@ -162,6 +170,16 @@ This file documents all AI prompts and responses used in the VibeQuorum platform
       };
     } catch (error: any) {
       logger.error(`❌ Hugging Face API error: ${error.message}`);
+
+      // Handle timeout errors
+      if (error.message?.includes('timeout') || error.message?.includes('took too long')) {
+        throw new AIError(
+          'AI generation timed out. The request took too long. Please try again with a shorter question or reduce max tokens.',
+          'AI_TIMEOUT',
+          504,
+          true
+        );
+      }
 
       // Handle specific Hugging Face errors
       if (error.status === 429) {
@@ -239,30 +257,25 @@ ${entry.response}
     // Remove excessive blank lines (more than 2 consecutive)
     cleaned = cleaned.replace(/\n{3,}/g, '\n\n');
 
-    // Ensure code blocks are properly closed (basic check)
+    // Ensure code blocks are properly closed
     const codeBlockCount = (cleaned.match(/```/g) || []).length;
     if (codeBlockCount % 2 !== 0) {
       // Unclosed code block - try to close it
       cleaned = cleaned.trimEnd();
       if (!cleaned.endsWith('```')) {
-        cleaned += '\n```';
-      }
-    }
-
-    // Remove trailing incomplete sentences (if response was cut off)
-    // This is a simple heuristic - if the last sentence doesn't end with punctuation
-    const lastChar = cleaned.trim().slice(-1);
-    if (!['.', '!', '?', '`', '}', ')', ']'].includes(lastChar)) {
-      // Check if it looks like an incomplete sentence
-      const lastLine = cleaned.trim().split('\n').pop() || '';
-      if (lastLine.length > 20 && !lastLine.endsWith('```')) {
-        // Likely incomplete - remove the last incomplete sentence
-        const sentences = cleaned.split(/(?<=[.!?])\s+/);
-        if (sentences.length > 1) {
-          cleaned = sentences.slice(0, -1).join(' ').trim();
+        // Check if we're in the middle of a code block
+        const lastCodeBlockIndex = cleaned.lastIndexOf('```');
+        const afterLastCodeBlock = cleaned.substring(lastCodeBlockIndex + 3);
+        // If there's content after the last ```, we need to close it
+        if (afterLastCodeBlock.trim().length > 0) {
+          cleaned += '\n```';
         }
       }
     }
+
+    // Don't remove incomplete content - keep it as-is
+    // The AI might have been cut off, but we should preserve what we got
+    // Users can see the full response and decide if they need to regenerate
 
     return cleaned.trim();
   }

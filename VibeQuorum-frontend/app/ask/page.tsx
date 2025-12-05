@@ -8,12 +8,15 @@ import { Bold, Italic, Code2, Plus, ArrowLeft, Eye, EyeOff, Loader2, AlertCircle
 import Link from "next/link"
 import { useWallet } from "@/hooks/use-wallet"
 import { useQuestions } from "@/hooks/use-questions"
+import { useApiAuth } from "@/hooks/use-api-auth"
+import { api } from "@/lib/api"
 import { ConnectButton } from "@rainbow-me/rainbowkit"
 
 export default function AskPage() {
   const router = useRouter()
   const { address, isConnected, shortAddress } = useWallet()
   const { createQuestion } = useQuestions()
+  const { signRequest } = useApiAuth()
   
   const [title, setTitle] = useState("")
   const [description, setDescription] = useState("")
@@ -71,18 +74,49 @@ export default function AskPage() {
     setIsSubmitting(true)
 
     try {
-      const question = createQuestion({
-        title: title.trim(),
-        description: description.trim(),
-        tags,
-        author: address,
-        displayName: shortAddress,
-      })
+      // Sign the request - signature is REQUIRED
+      let auth
+      try {
+        auth = await signRequest()
+      } catch (signError: any) {
+        // Handle signature rejection or errors
+        setError(signError.message || "Failed to sign request. Please approve the signature in your wallet.")
+        setIsSubmitting(false)
+        return
+      }
+
+      if (!auth || !auth.signature || !auth.timestamp) {
+        setError("Failed to sign request. Please make sure your wallet is connected and try again.")
+        setIsSubmitting(false)
+        return
+      }
+
+      const result = await api.questions.create(
+        {
+          title: title.trim(),
+          description: description.trim(),
+          tags,
+        },
+        address!,
+        auth.signature,
+        auth.timestamp
+      )
+
+      // Extract question ID from API response
+      // API returns: { question: { _id: "...", ... } }
+      const question = (result as any)?.question || result
+      const questionId = question?._id || question?.id
+      
+      if (!questionId) {
+        throw new Error("Failed to get question ID from response")
+      }
 
       // Redirect to the new question
-      router.push(`/questions/${question.id}`)
-    } catch (err) {
-      setError("Failed to create question. Please try again.")
+      router.push(`/questions/${questionId}`)
+    } catch (err: any) {
+      // Handle API errors
+      const errorMessage = err.message || "Failed to create question. Please try again."
+      setError(errorMessage)
       setIsSubmitting(false)
     }
   }
@@ -119,14 +153,21 @@ export default function AskPage() {
                 </p>
                 <div className="mt-3">
                   <ConnectButton.Custom>
-                    {({ openConnectModal }) => (
-                      <button
-                        onClick={openConnectModal}
-                        className="btn-primary text-sm py-2 px-4"
-                      >
-                        Connect Wallet
-                      </button>
-                    )}
+                    {({ account, chain, openConnectModal, mounted, openChainModal, openAccountModal }) => {
+                      const ready = mounted
+                      const connected = ready && account && chain
+
+                      return (
+                        <button
+                          onClick={openConnectModal}
+                          type="button"
+                          className="btn-primary text-sm py-2 px-4"
+                          disabled={!ready}
+                        >
+                          Connect Wallet
+                        </button>
+                      )
+                    }}
                   </ConnectButton.Custom>
                 </div>
               </div>
