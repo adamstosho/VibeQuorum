@@ -491,12 +491,10 @@ export const voteStore = {
   },
 }
 
-// Seed initial data for demo
+// Seed initial data for demo - DISABLED: Use real API data only
 export const seedDemoData = () => {
-  if (!isClient) return
-  
-  // Only seed if no data exists
-  if (questionStore.getAll().length > 0) return
+  // Disabled - no mock data, use real API data only
+  return
   
   const demoQuestions: Question[] = [
     {

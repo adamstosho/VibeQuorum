@@ -1,15 +1,16 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { 
   questionStore, 
   answerStore, 
   voteStore,
-  seedDemoData,
   Question, 
   Answer,
   Vote,
 } from '@/lib/stores/questions'
+import { api } from '@/lib/api'
+import { useApiAuth } from './use-api-auth'
 
 // Hook for managing questions list
 export function useQuestions(options?: {
@@ -20,37 +21,78 @@ export function useQuestions(options?: {
 }) {
   const [questions, setQuestions] = useState<Question[]>([])
   const [loading, setLoading] = useState(true)
+  const { address, signRequest } = useApiAuth()
+  const isMountedRef = useRef(true)
 
-  const refresh = useCallback(() => {
-    setLoading(true)
-    // Seed demo data on first load
-    seedDemoData()
+  const refresh = useCallback(async () => {
+    if (!isMountedRef.current) return
     
-    const results = questionStore.search(
-      options?.searchQuery || '',
-      options?.tags || [],
-      options?.status,
-      options?.sortBy || 'newest'
-    )
-    setQuestions(results)
-    setLoading(false)
+    isMountedRef.current = true
+    setLoading(true)
+    try {
+      const results = await api.questions.list({
+        search: options?.searchQuery,
+        tag: options?.tags?.[0],
+        sort: options?.sortBy || 'newest',
+      })
+      if (isMountedRef.current) {
+        // Backend returns: { success: true, data: questions[], pagination: {...} }
+        // request() extracts data.data, so results is the questions array directly
+        // The backend controller returns: res.json({ success: true, data: result.questions, pagination: ... })
+        // So results is already the questions array
+        const questionsArray = Array.isArray(results) ? results : []
+        
+        // Map MongoDB _id to id for frontend compatibility
+        const mappedQuestions = questionsArray.map((q: any) => ({
+          ...q,
+          id: q._id || q.id, // Use _id from MongoDB or fallback to id
+        }))
+        setQuestions(mappedQuestions)
+      }
+    } catch (error) {
+      if (isMountedRef.current) {
+        console.error('Failed to fetch questions:', error)
+        setQuestions([])
+      }
+    } finally {
+      if (isMountedRef.current) {
+        setLoading(false)
+      }
+    }
   }, [options?.searchQuery, options?.tags, options?.status, options?.sortBy])
 
   useEffect(() => {
-    refresh()
+    if (typeof window === 'undefined') return
+    
+    isMountedRef.current = true
+    const timeoutId = setTimeout(() => {
+      refresh()
+    }, 0)
+    
+    return () => {
+      clearTimeout(timeoutId)
+      isMountedRef.current = false
+    }
   }, [refresh])
 
-  const createQuestion = useCallback((data: {
+  const createQuestion = useCallback(async (data: {
     title: string
     description: string
     tags: string[]
     author: string
     displayName?: string
   }) => {
-    const question = questionStore.create(data)
-    refresh()
-    return question
-  }, [refresh])
+    if (!address) throw new Error('Wallet not connected')
+    const auth = await signRequest()
+    const result = await api.questions.create(
+      { title: data.title, description: data.description, tags: data.tags },
+      address,
+      auth?.signature,
+      auth?.timestamp
+    )
+    await refresh()
+    return result
+  }, [refresh, address, signRequest])
 
   return {
     questions,
@@ -65,27 +107,57 @@ export function useQuestions(options?: {
 export function useQuestion(questionId: string | null) {
   const [question, setQuestion] = useState<Question | null>(null)
   const [loading, setLoading] = useState(true)
+  const isMountedRef = useRef(true)
 
-  const refresh = useCallback(() => {
+  const refresh = useCallback(async () => {
     if (!questionId) {
       setQuestion(null)
       setLoading(false)
       return
     }
     
-    setLoading(true)
-    seedDemoData()
+    if (!isMountedRef.current) return
     
-    const q = questionStore.getById(questionId)
-    if (q) {
-      questionStore.incrementViews(questionId)
+    isMountedRef.current = true
+    setLoading(true)
+    try {
+      const result = await api.questions.get(questionId)
+      if (isMountedRef.current) {
+        const question = result?.question
+        if (question) {
+          // Map MongoDB _id to id for frontend compatibility
+          setQuestion({
+            ...question,
+            id: question._id || question.id,
+          })
+        } else {
+          setQuestion(null)
+        }
+      }
+    } catch (error) {
+      if (isMountedRef.current) {
+        console.error('Failed to fetch question:', error)
+        setQuestion(null)
+      }
+    } finally {
+      if (isMountedRef.current) {
+        setLoading(false)
+      }
     }
-    setQuestion(q)
-    setLoading(false)
   }, [questionId])
 
   useEffect(() => {
-    refresh()
+    if (typeof window === 'undefined') return
+    
+    isMountedRef.current = true
+    const timeoutId = setTimeout(() => {
+      refresh()
+    }, 0)
+    
+    return () => {
+      clearTimeout(timeoutId)
+      isMountedRef.current = false
+    }
   }, [refresh])
 
   const updateQuestion = useCallback((updates: Partial<Question>) => {
@@ -115,38 +187,75 @@ export function useQuestion(questionId: string | null) {
 export function useAnswers(questionId: string | null) {
   const [answers, setAnswers] = useState<Answer[]>([])
   const [loading, setLoading] = useState(true)
+  const { address, signRequest } = useApiAuth()
+  const isMountedRef = useRef(true)
 
-  const refresh = useCallback(() => {
+  const refresh = useCallback(async () => {
     if (!questionId) {
       setAnswers([])
       setLoading(false)
       return
     }
     
+    if (!isMountedRef.current) return
+    
+    isMountedRef.current = true
     setLoading(true)
-    const results = answerStore.getByQuestionId(questionId)
-    setAnswers(results)
-    setLoading(false)
+    try {
+      const results = await api.answers.list(questionId)
+      if (isMountedRef.current) {
+        // Map MongoDB _id to id for frontend compatibility
+        const mappedAnswers = (results?.answers || []).map((a: any) => ({
+          ...a,
+          id: a._id || a.id,
+          questionId: a.questionId || questionId,
+        }))
+        setAnswers(mappedAnswers)
+      }
+    } catch (error) {
+      if (isMountedRef.current) {
+        console.error('Failed to fetch answers:', error)
+        setAnswers([])
+      }
+    } finally {
+      if (isMountedRef.current) {
+        setLoading(false)
+      }
+    }
   }, [questionId])
 
   useEffect(() => {
-    refresh()
+    if (typeof window === 'undefined') return
+    
+    isMountedRef.current = true
+    const timeoutId = setTimeout(() => {
+      refresh()
+    }, 0)
+    
+    return () => {
+      clearTimeout(timeoutId)
+      isMountedRef.current = false
+    }
   }, [refresh])
 
-  const createAnswer = useCallback((data: {
+  const createAnswer = useCallback(async (data: {
     content: string
     author: string
     displayName?: string
     aiGenerated: boolean
   }) => {
-    if (!questionId) return null
-    const answer = answerStore.create({
-      ...data,
+    if (!questionId || !address) return null
+    const auth = await signRequest()
+    const result = await api.answers.create(
       questionId,
-    })
-    refresh()
-    return answer
-  }, [questionId, refresh])
+      { content: data.content, aiGenerated: data.aiGenerated },
+      address,
+      auth?.signature,
+      auth?.timestamp
+    )
+    await refresh()
+    return result
+  }, [questionId, refresh, address, signRequest])
 
   const acceptAnswer = useCallback((answerId: string, txHash?: string, vibeReward?: number) => {
     const answer = answerStore.accept(answerId, txHash, vibeReward)
@@ -215,8 +324,9 @@ export function useUserContent(userAddress: string | undefined) {
   const [questions, setQuestions] = useState<Question[]>([])
   const [answers, setAnswers] = useState<Answer[]>([])
   const [loading, setLoading] = useState(true)
+  const isMountedRef = useRef(true)
 
-  const refresh = useCallback(() => {
+  const refresh = useCallback(async () => {
     if (!userAddress) {
       setQuestions([])
       setAnswers([])
@@ -224,16 +334,52 @@ export function useUserContent(userAddress: string | undefined) {
       return
     }
     
-    setLoading(true)
-    seedDemoData()
+    if (!isMountedRef.current) return
     
-    setQuestions(questionStore.getByAuthor(userAddress))
-    setAnswers(answerStore.getByAuthor(userAddress))
-    setLoading(false)
+    isMountedRef.current = true
+    setLoading(true)
+    try {
+      // Fetch user's questions and answers from API
+      const allQuestionsResult = await api.questions.list()
+      if (isMountedRef.current) {
+        // Backend returns: { success: true, data: questions[], pagination: {...} }
+        // request() extracts data.data, so allQuestionsResult is the questions array directly
+        const allQuestions = Array.isArray(allQuestionsResult) ? allQuestionsResult : []
+        
+        const userQuestions = allQuestions.filter(
+          (q: any) => q.author?.toLowerCase() === userAddress.toLowerCase()
+        )
+        setQuestions(userQuestions)
+        
+        // For answers, we'd need an API endpoint for user's answers
+        // For now, return empty array
+        setAnswers([])
+      }
+    } catch (error) {
+      if (isMountedRef.current) {
+        console.error('Failed to fetch user content:', error)
+        setQuestions([])
+        setAnswers([])
+      }
+    } finally {
+      if (isMountedRef.current) {
+        setLoading(false)
+      }
+    }
   }, [userAddress])
 
   useEffect(() => {
-    refresh()
+    if (typeof window === 'undefined') return
+    
+    isMountedRef.current = true
+    const timeoutId = setTimeout(() => {
+      refresh()
+    }, 0)
+    
+    return () => {
+      clearTimeout(timeoutId)
+      isMountedRef.current = false
+    }
   }, [refresh])
 
   // Calculate total rewards earned

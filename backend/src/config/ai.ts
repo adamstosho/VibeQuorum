@@ -33,7 +33,7 @@ export const getOpenAIClient = (): OpenAI => {
  */
 export const AI_CONFIG = {
   model: process.env.HUGGINGFACE_MODEL || 'deepseek-ai/DeepSeek-V3.2:novita',
-  maxTokens: 1000,
+  maxTokens: 3000, // Increased for comprehensive answers
   temperature: 0.7,
   topP: 0.9,
 };

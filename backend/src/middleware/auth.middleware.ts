@@ -62,8 +62,8 @@ export const authMiddleware = async (
 };
 
 /**
- * Optional middleware - require signature for write operations
- * For MVP/hackathon: signature is optional, just log a warning
+ * Require signature for write operations
+ * Signature is REQUIRED for all write operations
  */
 export const requireSignature = (
   req: AuthRequest,
@@ -73,32 +73,32 @@ export const requireSignature = (
   const signature = req.headers['x-signature'] as string;
   const timestamp = req.headers['x-timestamp'] as string;
 
-  // For MVP: signature is optional, just proceed
-  // In production, enforce signature verification
-  if (process.env.NODE_ENV === 'production' && (!signature || !timestamp)) {
+  // Signature is REQUIRED
+  if (!signature || !timestamp) {
     throw new UnauthorizedError('Signature required for this operation');
   }
 
-  // If signature provided, verify it
-  if (signature && timestamp) {
-    const requestTime = parseInt(timestamp, 10);
-    const now = Date.now();
-    const timeWindow = 5 * 60 * 1000; // 5 minutes
+  // Verify timestamp
+  const requestTime = parseInt(timestamp, 10);
+  const now = Date.now();
+  const timeWindow = 5 * 60 * 1000; // 5 minutes
 
-    if (!isNaN(requestTime) && Math.abs(now - requestTime) <= timeWindow) {
-      const message = `Authenticate request at ${timestamp}`;
-      try {
-        const recoveredAddress = ethers.verifyMessage(message, signature);
-        if (recoveredAddress.toLowerCase() !== req.walletAddress?.toLowerCase()) {
-          throw new UnauthorizedError('Invalid signature');
-        }
-      } catch (error) {
-        // For MVP: log but don't fail
-        if (process.env.NODE_ENV === 'production') {
-          throw new UnauthorizedError('Signature verification failed');
-        }
-      }
+  if (isNaN(requestTime) || Math.abs(now - requestTime) > timeWindow) {
+    throw new UnauthorizedError('Request expired or invalid timestamp');
+  }
+
+  // Verify signature
+  const message = `Authenticate request at ${timestamp}`;
+  try {
+    const recoveredAddress = ethers.verifyMessage(message, signature);
+    if (recoveredAddress.toLowerCase() !== req.walletAddress?.toLowerCase()) {
+      throw new UnauthorizedError('Invalid signature');
     }
+  } catch (error: any) {
+    if (error instanceof UnauthorizedError) {
+      throw error;
+    }
+    throw new UnauthorizedError('Signature verification failed');
   }
 
   next();

@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import Link from "next/link"
 import { Menu, X, Wallet, ChevronDown, Zap, ExternalLink, Copy, Check } from "lucide-react"
 import Logo from "./logo"
@@ -8,6 +8,7 @@ import { useWallet } from "@/hooks/use-wallet"
 import { ConnectButton } from "@rainbow-me/rainbowkit"
 
 export default function Header() {
+  const [mounted, setMounted] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
   const [walletOpen, setWalletOpen] = useState(false)
   const [copied, setCopied] = useState(false)
@@ -24,6 +25,11 @@ export default function Header() {
     disconnect,
     explorerUrl,
   } = useWallet()
+
+  // Prevent hydration mismatch
+  useEffect(() => {
+    setMounted(true)
+  }, [])
 
   const copyAddress = () => {
     if (address) {
@@ -68,7 +74,7 @@ export default function Header() {
 
         {/* Wallet + Mobile Menu */}
         <div className="flex items-center gap-3 md:gap-4">
-          {isConnected ? (
+          {mounted && isConnected ? (
             <div className="relative group">
               <button
                 onClick={() => setWalletOpen(!walletOpen)}
@@ -153,24 +159,36 @@ export default function Header() {
                 </div>
               )}
             </div>
-          ) : (
+          ) : mounted ? (
             <ConnectButton.Custom>
-              {({ openConnectModal }) => (
-                <button
-                  onClick={openConnectModal}
-                  disabled={isConnecting}
-                  className="btn-primary gap-2 text-sm md:text-base disabled:opacity-50"
-                >
-                  <Wallet className="h-4 w-4 md:h-5 md:w-5" />
-                  {isConnecting ? (
-                    <span>Connecting...</span>
-                  ) : (
-                    <span className="hidden sm:inline">Connect Wallet</span>
-                  )}
-                  <span className="sm:hidden">{isConnecting ? "..." : "Connect"}</span>
-                </button>
-              )}
+              {({ account, chain, openConnectModal, mounted: buttonMounted, openChainModal, openAccountModal }) => {
+                const ready = buttonMounted
+                const connected = ready && account && chain
+
+                return (
+                  <button
+                    onClick={openConnectModal}
+                    type="button"
+                    disabled={isConnecting || !ready}
+                    className="btn-primary gap-2 text-sm md:text-base disabled:opacity-50"
+                  >
+                    <Wallet className="h-4 w-4 md:h-5 md:w-5" />
+                    {isConnecting ? (
+                      <span>Connecting...</span>
+                    ) : (
+                      <span className="hidden sm:inline">Connect Wallet</span>
+                    )}
+                    <span className="sm:hidden">{isConnecting ? "..." : "Connect"}</span>
+                  </button>
+                )
+              }}
             </ConnectButton.Custom>
+          ) : (
+            <div className="btn-primary gap-2 text-sm md:text-base opacity-50">
+              <Wallet className="h-4 w-4 md:h-5 md:w-5" />
+              <span className="hidden sm:inline">Connect Wallet</span>
+              <span className="sm:hidden">Connect</span>
+            </div>
           )}
 
           {/* Mobile Menu Toggle */}
@@ -190,7 +208,7 @@ export default function Header() {
       {/* Mobile Menu */}
       {menuOpen && (
         <div className="md:hidden border-t border-border bg-card/50 backdrop-blur-xl p-4 space-y-2 animate-slide-in-down">
-          {isConnected && (
+          {mounted && isConnected && (
             <div className="flex items-center gap-2 px-4 py-2 bg-accent/10 rounded-lg mb-2">
               <Zap className="h-4 w-4 text-accent" />
               <span className="text-sm font-bold text-accent">{vibeBalanceFormatted} VIBE</span>

@@ -43,3 +43,5 @@ VoteSchema.index({ targetType: 1, targetId: 1 });
 
 export const Vote = mongoose.model<IVote>('Vote', VoteSchema);
 
+
+

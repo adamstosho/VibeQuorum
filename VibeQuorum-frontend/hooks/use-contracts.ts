@@ -81,7 +81,7 @@ export function useRewardManagerRole(address: string | undefined) {
     hasAdminRole: hasAdminRole as boolean | undefined,
     hasRole: hasAdminRole as boolean | undefined,
     isAdmin: hasAdminRole as boolean | undefined,
-    dailyDistributed: dailyDistributed ? parseFloat(formatEther((dailyDistributed as bigint[])[0])) : 0,
+    dailyDistributed: dailyDistributed ? parseFloat(formatEther((Array.from(dailyDistributed) as bigint[])[0])) : 0,
     dailyLimit: 10000, // Default daily limit
   }
 }

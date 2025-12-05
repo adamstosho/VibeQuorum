@@ -69,3 +69,5 @@ AnswerSchema.index({ isAccepted: 1 });
 
 export const Answer = mongoose.model<IAnswer>('Answer', AnswerSchema);
 
+
+
