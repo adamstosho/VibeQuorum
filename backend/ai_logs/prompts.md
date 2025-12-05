@@ -427,3 +427,838 @@ git commit -m "AI-assisted: AI integration documentation"
 ---
 
 *End of AI Prompt Logs*
+
+## Entry: 2025-12-05T06:53:48.935Z
+
+**Question ID:** `69327f69cd0bbeaf95668416`
+**Model:** deepseek-ai/DeepSeek-V3.2:novita
+**Tokens Used:** 1227
+
+### Prompt
+
+```
+## Question
+**Title:** How to implement ERC20 token with custom features?
+
+**Description:**
+I want to create an ERC20 token but need to add custom features like transfer fees and blacklist functionality. What is the best approach?
+
+**Tags:** solidity, erc20, smart-contracts
+
+---
+
+Please provide a helpful, technically accurate answer to this Web3 development question. Include code examples if relevant.
+```
+
+### AI Response
+
+# Implementing ERC20 Token with Custom Features
+
+## Overview
+To implement an ERC20 token with custom features like transfer fees and blacklist functionality, you should extend a standard ERC20 implementation (like OpenZeppelin's) and override key functions. Here's a recommended approach:
+
+## Recommended Implementation Structure
+
+```solidity
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.20;
+
+import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+import "@openzeppelin/contracts/access/Ownable.sol";
+
+contract CustomERC20 is ERC20, Ownable {
+    // Fee configuration
+    uint256 public transferFeePercentage; // Basis points (1% = 100)
+    address public feeCollector;
+    
+    // Blacklist functionality
+    mapping(address => bool) private _blacklisted;
+    
+    // Events
+    event FeeUpdated(uint256 oldFee, uint256 newFee);
+    event FeeCollectorUpdated(address oldCollector, address newCollector);
+    event Blacklisted(address indexed account);
+    event UnBlacklisted(address indexed account);
+    
+    constructor(
+        string memory name,
+        string memory symbol,
+        uint256 initialSupply,
+        uint256 _transferFeePercentage,
+        address _feeCollector
+    ) ERC20(name, symbol) Ownable(msg.sender) {
+        require(_transferFeePercentage <= 1000, "Fee cannot exceed 10%");
+        require(_feeCollector != address(0), "Invalid fee collector");
+        
+        transferFeePercentage = _transferFeePercentage;
+        feeCollector = _feeCollector;
+        
+        _mint(msg.sender, initialSupply);
+    }
+    
+    // Override transfer functions to include fees
+    function transfer(address to, uint256 amount) 
+        public 
+        override 
+        notBlacklisted(msg.sender)
+        notBlacklisted(to)
+        returns (bool) 
+    {
+        uint256 fee = _calculateFee(amount);
+        uint256 amountAfterFee = amount - fee;
+        
+        // Take fee from sender
+        if (fee > 0) {
+            _transfer(msg.sender, feeCollector, fee);
+        }
+        
+        // Transfer remaining amount
+        return super.transfer(to, amountAfterFee);
+    }
+    
+    function transferFrom(address from, address to, uint256 amount) 
+        public 
+        override 
+        notBlacklisted(from)
+        notBlacklisted(to)
+        returns (bool) 
+    {
+        uint256 fee = _calculateFee(amount);
+        uint256 amountAfterFee = amount - fee;
+        
+        // Take fee from sender
+        if (fee > 0) {
+            _transfer(from, feeCollector, fee);
+        }
+        
+        // Transfer remaining amount
+        return super.transferFrom(from, to, amountAfterFee);
+    }
+    
+    // Fee calculation
+    function _calculateFee(uint256 amount) internal view returns (uint256) {
+        return (amount * transferFeePercentage) / 10000;
+    }
+    
+    // Blacklist management (owner only)
+    function blacklist(address account) external onlyOwner {
+        require(!_blacklisted[account], "Already blacklisted");
+        _blacklisted[account] = true;
+        emit Blacklisted(account);
+    }
+    
+    function unblacklist(address account) external onlyOwner {
+        require(_blacklisted[account], "Not blacklisted");
+        _blacklisted[account] = false;
+        emit UnBlacklisted(account);
+    }
+    
+    function isBlacklisted(address account) external view returns (bool) {
+        return _blacklisted[account];
+    }
+    
+    // Fee management (owner only)
+    function updateTransferFee(uint256 newFeePercentage) external onlyOwner {
+        require(newFeePercentage <= 1000, "Fee cannot exceed 10%");
+        emit FeeUpdated(transferFeePercentage, newFeePercentage);
+        transferFeePercentage = newFeePercentage;
+    }
+    
+    function updateFeeCollector(address newCollector) external onlyOwner {
+        require(newCollector != address(0), "Invalid fee collector");
+        emit FeeCollectorUpdated(feeCollector, newCollector);
+        feeCollector = newCollector;
+    }
+    
+    // Modifiers
+    modifier notBlacklisted(address account) {
+        require(!_blacklisted[account], "Account is blacklisted");
+        _;
+    }
+}
+```
+
+## Key Implementation Details
+
+### 1. **Transfer Fees**
+- Calculate fees as a percentage (basis points: 1% = 100)
+- Deduct fee before transferring remaining amount
+- Send fees to designated collector address
+
+### 2. **Blacklist Functionality**
+- Store blacklisted addresses in a mapping
+- Add modifiers to restrict blacklisted accounts
+
+
+---
+
+
+## Entry: 2025-12-05T06:54:55.922Z
+
+**Question ID:** `69327f69cd0bbeaf95668416`
+**Model:** deepseek-ai/DeepSeek-V3.2:novita
+**Tokens Used:** 1227
+
+### Prompt
+
+```
+## Question
+**Title:** How to implement ERC20 token with custom features?
+
+**Description:**
+I want to create an ERC20 token but need to add custom features like transfer fees and blacklist functionality. What is the best approach?
+
+**Tags:** solidity, erc20, smart-contracts
+
+---
+
+Please provide a helpful, technically accurate answer to this Web3 development question. Include code examples if relevant.
+```
+
+### AI Response
+
+# Implementing ERC20 Token with Custom Features
+
+Here's a comprehensive approach to creating an ERC20 token with transfer fees and blacklist functionality using Solidity.
+
+## 1. Basic Structure with OpenZeppelin
+
+Start with OpenZeppelin's ERC20 implementation and extend it:
+
+```solidity
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.20;
+
+import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+import "@openzeppelin/contracts/access/Ownable.sol";
+
+contract CustomERC20 is ERC20, Ownable {
+    uint256 public transferFeePercentage; // Fee as percentage (e.g., 100 = 1%)
+    address public feeCollector;
+    
+    // Blacklist mapping
+    mapping(address => bool) public isBlacklisted;
+    
+    // Events
+    event Blacklisted(address indexed account);
+    event Unblacklisted(address indexed account);
+    event FeeUpdated(uint256 oldFee, uint256 newFee);
+    event FeeCollectorUpdated(address oldCollector, address newCollector);
+    
+    constructor(
+        string memory name,
+        string memory symbol,
+        uint256 initialSupply,
+        uint256 feePercentage,
+        address initialFeeCollector
+    ) ERC20(name, symbol) Ownable(msg.sender) {
+        _mint(msg.sender, initialSupply);
+        transferFeePercentage = feePercentage;
+        feeCollector = initialFeeCollector;
+    }
+}
+```
+
+## 2. Blacklist Functionality
+
+```solidity
+// Blacklist management functions
+function blacklist(address account) external onlyOwner {
+    require(!isBlacklisted[account], "Account already blacklisted");
+    isBlacklisted[account] = true;
+    emit Blacklisted(account);
+}
+
+function unblacklist(address account) external onlyOwner {
+    require(isBlacklisted[account], "Account not blacklisted");
+    isBlacklisted[account] = false;
+    emit Unblacklisted(account);
+}
+
+// Modifier to check blacklist status
+modifier notBlacklisted(address account) {
+    require(!isBlacklisted[account], "Account is blacklisted");
+    _;
+}
+```
+
+## 3. Transfer Fee Implementation
+
+```solidity
+// Fee management
+function setTransferFee(uint256 feePercentage) external onlyOwner {
+    require(feePercentage <= 1000, "Fee cannot exceed 10%"); // Safety limit
+    uint256 oldFee = transferFeePercentage;
+    transferFeePercentage = feePercentage;
+    emit FeeUpdated(oldFee, feePercentage);
+}
+
+function setFeeCollector(address newCollector) external onlyOwner {
+    require(newCollector != address(0), "Invalid fee collector address");
+    address oldCollector = feeCollector;
+    feeCollector = newCollector;
+    emit FeeCollectorUpdated(oldCollector, newCollector);
+}
+
+// Calculate fee amount
+function calculateFee(uint256 amount) public view returns (uint256) {
+    return (amount * transferFeePercentage) / 10000; // Supports 2 decimal precision (100 = 1%)
+}
+
+// Override transfer functions to include fees
+function transfer(
+    address to,
+    uint256 amount
+) public override notBlacklisted(msg.sender) notBlacklisted(to) returns (bool) {
+    uint256 fee = calculateFee(amount);
+    uint256 amountAfterFee = amount - fee;
+    
+    // Take fee if applicable
+    if (fee > 0 && feeCollector != address(0)) {
+        super.transfer(feeCollector, fee);
+    }
+    
+    return super.transfer(to, amountAfterFee);
+}
+
+function transferFrom(
+    address from,
+    address to,
+    uint256 amount
+) public override notBlacklisted(from) notBlacklisted(to) returns (bool) {
+    uint256 fee = calculateFee(amount);
+    uint256 amountAfterFee = amount - fee;
+    
+    // Take fee if applicable
+    if (fee > 0 && feeCollector != address(0)) {
+        super.transferFrom(from, feeCollector, fee);
+    }
+    
+    return super.transferFrom(from, to, amountAfterFee);
+}
+```
+
+## 4. Complete Implementation with Additional Features
+
+```solidity
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.20;
+
+import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+import "@openzeppelin/contracts/access/Ownable.sol";
+
+contract AdvancedERC20 is ERC20, Ownable {
+    uint256 public transferFeePercentage;
+    address public feeCollector;
+    mapping(address => bool) public isBlacklisted;
+    
+    // Whitelist for fee exemption
+    mapping(address =>
+
+---
+
+
+## Entry: 2025-12-05T06:56:22.576Z
+
+**Question ID:** `69327f69cd0bbeaf95668416`
+**Model:** deepseek-ai/DeepSeek-V3.2:novita
+**Tokens Used:** 1227
+
+### Prompt
+
+```
+## Question
+**Title:** How to implement ERC20 token with custom features?
+
+**Description:**
+I want to create an ERC20 token but need to add custom features like transfer fees and blacklist functionality. What is the best approach?
+
+**Tags:** solidity, erc20, smart-contracts
+
+---
+
+Please provide a helpful, technically accurate answer to this Web3 development question. Include code examples if relevant.
+```
+
+### AI Response
+
+## Implementing ERC20 with Custom Features
+
+For an ERC20 token with custom features like transfer fees and blacklist functionality, the recommended approach is to use inheritance from OpenZeppelin's ERC20 implementation and extend it with your custom logic.
+
+### Recommended Architecture
+
+```solidity
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.20;
+
+import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+import "@openzeppelin/contracts/access/Ownable.sol";
+
+contract CustomERC20 is ERC20, Ownable {
+    // Fee configuration
+    uint256 public transferFeePercentage; // Basis points (e.g., 100 = 1%)
+    address public feeRecipient;
+    
+    // Blacklist management
+    mapping(address => bool) private _blacklisted;
+    
+    // Events
+    event TransferFeeUpdated(uint256 oldFee, uint256 newFee);
+    event FeeRecipientUpdated(address oldRecipient, address newRecipient);
+    event AddressBlacklisted(address indexed account);
+    event AddressUnblacklisted(address indexed account);
+    
+    constructor(
+        string memory name,
+        string memory symbol,
+        uint256 initialSupply,
+        uint256 _transferFeePercentage,
+        address _feeRecipient
+    ) ERC20(name, symbol) Ownable(msg.sender) {
+        require(_transferFeePercentage <= 1000, "Fee cannot exceed 10%");
+        require(_feeRecipient != address(0), "Invalid fee recipient");
+        
+        transferFeePercentage = _transferFeePercentage;
+        feeRecipient = _feeRecipient;
+        
+        _mint(msg.sender, initialSupply);
+    }
+    
+    // Override transfer functions to include fee logic
+    function transfer(address to, uint256 amount) 
+        public 
+        override 
+        notBlacklisted(msg.sender)
+        notBlacklisted(to)
+        returns (bool) 
+    {
+        uint256 fee = calculateFee(amount);
+        uint256 amountAfterFee = amount - fee;
+        
+        // Take fee from sender
+        if (fee > 0) {
+            _transfer(msg.sender, feeRecipient, fee);
+        }
+        
+        // Transfer remaining amount
+        return super.transfer(to, amountAfterFee);
+    }
+    
+    function transferFrom(
+        address from,
+        address to,
+        uint256 amount
+    ) 
+        public 
+        override 
+        notBlacklisted(from)
+        notBlacklisted(to)
+        returns (bool) 
+    {
+        uint256 fee = calculateFee(amount);
+        uint256 amountAfterFee = amount - fee;
+        
+        // Take fee from sender
+        if (fee > 0) {
+            _transfer(from, feeRecipient, fee);
+        }
+        
+        // Transfer remaining amount
+        return super.transferFrom(from, to, amountAfterFee);
+    }
+    
+    // Fee calculation
+    function calculateFee(uint256 amount) public view returns (uint256) {
+        return (amount * transferFeePercentage) / 10000; // Basis points
+    }
+    
+    // Blacklist functionality
+    modifier notBlacklisted(address account) {
+        require(!_blacklisted[account], "Address is blacklisted");
+        _;
+    }
+    
+    function blacklist(address account) external onlyOwner {
+        require(account != address(0), "Invalid address");
+        require(!_blacklisted[account], "Already blacklisted");
+        
+        _blacklisted[account] = true;
+        emit AddressBlacklisted(account);
+    }
+    
+    function unblacklist(address account) external onlyOwner {
+        require(_blacklisted[account], "Not blacklisted");
+        
+        _blacklisted[account] = false;
+        emit AddressUnblacklisted(account);
+    }
+    
+    function isBlacklisted(address account) external view returns (bool) {
+        return _blacklisted[account];
+    }
+    
+    // Admin functions for fee management
+    function updateTransferFee(uint256 newFeePercentage) external onlyOwner {
+        require(newFeePercentage <= 1000, "Fee cannot exceed 10%");
+        
+        uint256 oldFee = transferFeePercentage;
+        transferFeePercentage = newFeePercentage;
+        emit TransferFeeUpdated(oldFee, newFeePercentage);
+    }
+    
+    function updateFeeRecipient(address newRecipient) external onlyOwner {
+        require(newRecipient != address(0), "Invalid recipient");
+        
+        address oldRecipient = feeRecipient;
+        feeRecipient = newRecipient;
+        emit FeeRecipientUpdated(oldRecipient, newRecipient);
+    }
+}
+```
+
+### Key Implementation Details
+
+**1. Transfer Fee Logic:**
+- Calculate fees using basis points (1% = 100 basis points)
+- Deduct fee before transferring the net amount
+- Send fees to
+
+---
+
+
+## Entry: 2025-12-05T06:57:14.555Z
+
+**Question ID:** `69327f69cd0bbeaf95668416`
+**Model:** deepseek-ai/DeepSeek-V3.2:novita
+**Tokens Used:** 1227
+
+### Prompt
+
+```
+## Question
+**Title:** How to implement ERC20 token with custom features?
+
+**Description:**
+I want to create an ERC20 token but need to add custom features like transfer fees and blacklist functionality. What is the best approach?
+
+**Tags:** solidity, erc20, smart-contracts
+
+---
+
+Please provide a helpful, technically accurate answer to this Web3 development question. Include code examples if relevant.
+```
+
+### AI Response
+
+# Implementing ERC20 Token with Custom Features
+
+## Overview
+To create an ERC20 token with custom features like transfer fees and blacklist functionality, you should extend a standard ERC20 implementation and override the transfer functions to add your custom logic.
+
+## Recommended Approach
+
+### 1. Start with a Standard Implementation
+Use OpenZeppelin's ERC20 as a base, which provides security-audited, standard-compliant functionality.
+
+```solidity
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.20;
+
+import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+import "@openzeppelin/contracts/access/Ownable.sol";
+
+contract CustomERC20 is ERC20, Ownable {
+    // Transfer fee parameters
+    uint256 public transferFeePercentage = 1; // 1% fee
+    address public feeCollector;
+    
+    // Blacklist functionality
+    mapping(address => bool) public isBlacklisted;
+    
+    constructor(
+        string memory name_,
+        string memory symbol_,
+        uint256 initialSupply_,
+        address feeCollector_
+    ) ERC20(name_, symbol_) Ownable(msg.sender) {
+        _mint(msg.sender, initialSupply_);
+        feeCollector = feeCollector_;
+    }
+```
+
+### 2. Implement Blacklist Functionality
+
+```solidity
+    // Blacklist management functions
+    function addToBlacklist(address account) external onlyOwner {
+        require(!isBlacklisted[account], "Account already blacklisted");
+        isBlacklisted[account] = true;
+        emit Blacklisted(account);
+    }
+    
+    function removeFromBlacklist(address account) external onlyOwner {
+        require(isBlacklisted[account], "Account not blacklisted");
+        isBlacklisted[account] = false;
+        emit Unblacklisted(account);
+    }
+    
+    // Modifier to check blacklist status
+    modifier notBlacklisted(address account) {
+        require(!isBlacklisted[account], "Account is blacklisted");
+        _;
+    }
+```
+
+### 3. Implement Transfer Fee Logic
+
+```solidity
+    // Override transfer functions to include fee logic
+    function transfer(
+        address to,
+        uint256 amount
+    ) public override notBlacklisted(msg.sender) notBlacklisted(to) returns (bool) {
+        return _transferWithFee(msg.sender, to, amount);
+    }
+    
+    function transferFrom(
+        address from,
+        address to,
+        uint256 amount
+    ) public override notBlacklisted(from) notBlacklisted(to) returns (bool) {
+        address spender = _msgSender();
+        _spendAllowance(from, spender, amount);
+        return _transferWithFee(from, to, amount);
+    }
+    
+    // Internal transfer with fee calculation
+    function _transferWithFee(
+        address from,
+        address to,
+        uint256 amount
+    ) internal returns (bool) {
+        require(amount > 0, "Transfer amount must be greater than 0");
+        
+        uint256 feeAmount = (amount * transferFeePercentage) / 100;
+        uint256 transferAmount = amount - feeAmount;
+        
+        // Transfer the net amount to recipient
+        super._transfer(from, to, transferAmount);
+        
+        // Transfer fee to fee collector
+        if (feeAmount > 0 && feeCollector != address(0)) {
+            super._transfer(from, feeCollector, feeAmount);
+        }
+        
+        return true;
+    }
+```
+
+### 4. Add Configuration Functions
+
+```solidity
+    // Fee configuration functions
+    function setTransferFeePercentage(uint256 newFeePercentage) external onlyOwner {
+        require(newFeePercentage <= 10, "Fee cannot exceed 10%");
+        transferFeePercentage = newFeePercentage;
+        emit TransferFeeUpdated(newFeePercentage);
+    }
+    
+    function setFeeCollector(address newFeeCollector) external onlyOwner {
+        require(newFeeCollector != address(0), "Invalid fee collector address");
+        feeCollector = newFeeCollector;
+        emit FeeCollectorUpdated(newFeeCollector);
+    }
+```
+
+### 5. Complete Contract with Events
+
+```solidity
+    // Events
+    event Blacklisted(address indexed account);
+    event Unblacklisted(address indexed account);
+    event TransferFeeUpdated(uint256 newFeePercentage);
+    event FeeCollectorUpdated(address newFeeCollector);
+}
+```
+
+## Security Considerations
+
+### 1. **Reentrancy Protection**
+The OpenZeppelin ERC20 implementation already includes reentrancy protection through the Checks-Effects-Interactions pattern.
+
+### 2. **Access Control**
+- Use `onlyOwner` modifier for sensitive functions
+- Consider using role-based access control (RB
+
+---
+
+
+## Entry: 2025-12-05T06:59:13.792Z
+
+**Question ID:** `69327f69cd0bbeaf95668416`
+**Model:** deepseek-ai/DeepSeek-V3.2:novita
+**Tokens Used:** 1227
+
+### Prompt
+
+```
+## Question
+**Title:** How to implement ERC20 token with custom features?
+
+**Description:**
+I want to create an ERC20 token but need to add custom features like transfer fees and blacklist functionality. What is the best approach?
+
+**Tags:** solidity, erc20, smart-contracts
+
+---
+
+Please provide a helpful, technically accurate answer to this Web3 development question. Include code examples if relevant.
+```
+
+### AI Response
+
+# Implementing ERC20 Token with Custom Features
+
+## Recommended Approach
+Extend OpenZeppelin's ERC20 implementation and add your custom features. This ensures security, gas efficiency, and compatibility with existing tools.
+
+## Base Implementation with OpenZeppelin
+
+```solidity
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.20;
+
+import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+import "@openzeppelin/contracts/access/Ownable.sol";
+
+contract CustomERC20 is ERC20, Ownable {
+    // Transfer fee in basis points (1% = 100)
+    uint256 public transferFeeBasisPoints;
+    
+    // Fee recipient address
+    address public feeRecipient;
+    
+    // Blacklist mapping
+    mapping(address => bool) public blacklisted;
+    
+    // Events
+    event TransferFeeUpdated(uint256 oldFee, uint256 newFee);
+    event FeeRecipientUpdated(address oldRecipient, address newRecipient);
+    event AddressBlacklisted(address indexed account);
+    event AddressUnblacklisted(address indexed account);
+    
+    constructor(
+        string memory name,
+        string memory symbol,
+        uint256 initialSupply,
+        uint256 _transferFeeBasisPoints,
+        address _feeRecipient
+    ) ERC20(name, symbol) Ownable(msg.sender) {
+        require(_transferFeeBasisPoints <= 1000, "Fee cannot exceed 10%");
+        require(_feeRecipient != address(0), "Invalid fee recipient");
+        
+        transferFeeBasisPoints = _transferFeeBasisPoints;
+        feeRecipient = _feeRecipient;
+        
+        _mint(msg.sender, initialSupply);
+    }
+    
+    // Custom transfer with fee
+    function transfer(address to, uint256 amount) 
+        public 
+        override 
+        notBlacklisted(msg.sender)
+        notBlacklisted(to)
+        returns (bool) 
+    {
+        uint256 fee = calculateFee(amount);
+        uint256 amountAfterFee = amount - fee;
+        
+        // Take fee from sender
+        if (fee > 0) {
+            _transfer(msg.sender, feeRecipient, fee);
+        }
+        
+        // Transfer remaining amount
+        _transfer(msg.sender, to, amountAfterFee);
+        
+        return true;
+    }
+    
+    // Custom transferFrom with fee
+    function transferFrom(
+        address from,
+        address to,
+        uint256 amount
+    ) 
+        public 
+        override 
+        notBlacklisted(from)
+        notBlacklisted(to)
+        returns (bool) 
+    {
+        uint256 fee = calculateFee(amount);
+        uint256 amountAfterFee = amount - fee;
+        
+        // Take fee from sender
+        if (fee > 0) {
+            _transfer(from, feeRecipient, fee);
+        }
+        
+        // Transfer remaining amount (will check allowance)
+        _transfer(from, to, amountAfterFee);
+        
+        // Update allowance
+        uint256 currentAllowance = allowance(from, msg.sender);
+        require(currentAllowance >= amount, "ERC20: insufficient allowance");
+        _approve(from, msg.sender, currentAllowance - amount);
+        
+        return true;
+    }
+    
+    // Calculate fee amount
+    function calculateFee(uint256 amount) public view returns (uint256) {
+        return (amount * transferFeeBasisPoints) / 10000;
+    }
+    
+    // Blacklist functionality
+    modifier notBlacklisted(address account) {
+        require(!blacklisted[account], "Address is blacklisted");
+        _;
+    }
+    
+    function blacklistAddress(address account) external onlyOwner {
+        require(account != address(0), "Invalid address");
+        require(!blacklisted[account], "Already blacklisted");
+        
+        blacklisted[account] = true;
+        emit AddressBlacklisted(account);
+    }
+    
+    function unblacklistAddress(address account) external onlyOwner {
+        require(blacklisted[account], "Not blacklisted");
+        
+        blacklisted[account] = false;
+        emit AddressUnblacklisted(account);
+    }
+    
+    // Admin functions
+    function updateTransferFee(uint256 newFeeBasisPoints) external onlyOwner {
+        require(newFeeBasisPoints <= 1000, "Fee cannot exceed 10%");
+        
+        uint256 oldFee = transferFeeBasisPoints;
+        transferFeeBasisPoints = newFeeBasisPoints;
+        
+        emit TransferFeeUpdated(oldFee, newFeeBasisPoints);
+    }
+    
+    function updateFeeRecipient(address newRecipient) external onlyOwner {
+        require(newRecipient != address(0), "Invalid recipient");
+        
+        address oldRecipient = feeRecipient;
+        feeRecipient = newRecipient;
+```
+
+---
+
