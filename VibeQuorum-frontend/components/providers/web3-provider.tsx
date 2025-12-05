@@ -3,7 +3,7 @@
 import { WagmiProvider } from 'wagmi'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { RainbowKitProvider, darkTheme } from '@rainbow-me/rainbowkit'
-import { wagmiConfig } from '@/lib/web3/config'
+import { wagmiConfig, DEFAULT_CHAIN_ID } from '@/lib/web3/config'
 import '@rainbow-me/rainbowkit/styles.css'
 
 // Create a client
@@ -25,6 +25,7 @@ export function Web3Provider({ children }: Web3ProviderProps) {
     <WagmiProvider config={wagmiConfig}>
       <QueryClientProvider client={queryClient}>
         <RainbowKitProvider
+          initialChain={DEFAULT_CHAIN_ID}
           theme={darkTheme({
             accentColor: '#8B5CF6', // Primary purple color
             accentColorForeground: 'white',
@@ -41,4 +42,5 @@ export function Web3Provider({ children }: Web3ProviderProps) {
     </WagmiProvider>
   )
 }
+
 

@@ -1,9 +1,13 @@
 'use client'
 
-import { useReadContract, useWriteContract, useWaitForTransactionReceipt } from 'wagmi'
+import { useReadContract, useWriteContract, useWaitForTransactionReceipt, useAccount } from 'wagmi'
 import { formatEther, keccak256, toBytes } from 'viem'
 import { CONTRACT_ADDRESSES } from '@/lib/web3/config'
 import { REWARD_MANAGER_ABI } from '@/lib/web3/abis/RewardManager'
+
+// Role hashes
+const ADMIN_ROLE = '0x0000000000000000000000000000000000000000000000000000000000000000'
+const REWARDER_ROLE = '0xb8dc3ce3fc17f0cfeef0de55e0efa9cadbab8f3ce87e9eadfc787a8a3be13eab'
 
 export interface RewardConfig {
   acceptedAnswerReward: number
@@ -20,6 +24,8 @@ export interface RewardStats {
 }
 
 export function useRewardManager() {
+  const { address: userAddress } = useAccount()
+
   // Read reward config
   const { data: rewardConfigRaw, refetch: refetchConfig } = useReadContract({
     address: CONTRACT_ADDRESSES.rewardManager as `0x${string}`,
@@ -37,6 +43,27 @@ export function useRewardManager() {
     functionName: 'getStats',
     query: {
       enabled: !!CONTRACT_ADDRESSES.rewardManager,
+    },
+  })
+
+  // Role checks
+  const { data: hasAdminRole } = useReadContract({
+    address: CONTRACT_ADDRESSES.rewardManager as `0x${string}`,
+    abi: REWARD_MANAGER_ABI,
+    functionName: 'hasRole',
+    args: userAddress ? [ADMIN_ROLE, userAddress as `0x${string}`] : undefined,
+    query: {
+      enabled: !!CONTRACT_ADDRESSES.rewardManager && !!userAddress,
+    },
+  })
+
+  const { data: hasRewarderRole } = useReadContract({
+    address: CONTRACT_ADDRESSES.rewardManager as `0x${string}`,
+    abi: REWARD_MANAGER_ABI,
+    functionName: 'hasRole',
+    args: userAddress ? [REWARDER_ROLE, userAddress as `0x${string}`] : undefined,
+    query: {
+      enabled: !!CONTRACT_ADDRESSES.rewardManager && !!userAddress,
     },
   })
 
@@ -67,11 +94,13 @@ export function useRewardManager() {
   const rewardAcceptedAnswer = async (
     recipient: string,
     answerId: string,
-    questionId: number
-  ) => {
+    questionId?: number | string
+  ): Promise<{ hash: `0x${string}` | undefined }> => {
     if (!CONTRACT_ADDRESSES.rewardManager) {
       throw new Error('RewardManager contract address not configured')
     }
+
+    const qId = typeof questionId === 'string' ? 1 : (questionId ?? 1)
 
     writeContract({
       address: CONTRACT_ADDRESSES.rewardManager as `0x${string}`,
@@ -80,9 +109,12 @@ export function useRewardManager() {
       args: [
         recipient as `0x${string}`,
         generateAnswerId(answerId),
-        BigInt(questionId),
+        BigInt(qId),
       ],
     })
+
+    // Return the hash that will be set after writeContract
+    return { hash }
   }
 
   // Trigger reward for upvote threshold (admin only)
@@ -151,6 +183,10 @@ export function useRewardManager() {
     ])
   }
 
+  // Daily distributed and limit
+  const dailyDistributed = stats?.totalDistributed || 0
+  const dailyLimit = config?.maxDailyReward || 10000
+
   return {
     // Contract address
     contractAddress: CONTRACT_ADDRESSES.rewardManager,
@@ -158,6 +194,14 @@ export function useRewardManager() {
     // Read data
     config,
     stats,
+    dailyDistributed,
+    dailyLimit,
+    
+    // Role checks
+    hasAdminRole: hasAdminRole as boolean | undefined,
+    hasRewarderRole: hasRewarderRole as boolean | undefined,
+    hasRole: (hasAdminRole || hasRewarderRole) as boolean | undefined,
+    isAdmin: hasAdminRole as boolean | undefined,
     
     // Write functions
     rewardAcceptedAnswer,
@@ -172,6 +216,7 @@ export function useRewardManager() {
     isConfirming,
     isSuccess,
     txHash: hash,
+    lastTxHash: hash,
     error: writeError || confirmError,
     resetWrite,
     
@@ -241,4 +286,5 @@ export function useUserRewardStatus(userAddress: string | undefined) {
     cooldownEnds: canReceive ? Number((canReceive as [boolean, bigint])[1]) : 0,
   }
 }
+
 

@@ -4,11 +4,11 @@ import { ArrowUp, MessageCircle, CheckCircle } from "lucide-react"
 import Link from "next/link"
 
 interface QuestionCardProps {
-  id: number
+  id: string | number
   title: string
   excerpt: string
   author: string
-  displayName: string
+  displayName?: string
   tags: string[]
   answers: number
   upvotes: number
@@ -29,7 +29,7 @@ export default function QuestionCard({
   acceptedAnswer,
 }: QuestionCardProps) {
   return (
-    <Link href={`/question/${id}`}>
+    <Link href={`/questions/${id}`}>
       <div className="card-base space-y-3 hover:border-primary/50 hover:shadow-lg hover:shadow-primary/10 transition-all duration-300 cursor-pointer group">
         <div className="flex items-start justify-between gap-4">
           <div className="flex-1 space-y-2">

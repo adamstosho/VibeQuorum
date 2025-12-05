@@ -2,16 +2,36 @@
 
 import { useState } from "react"
 import Link from "next/link"
-import { Menu, X, Wallet, ChevronDown, Zap } from "lucide-react"
+import { Menu, X, Wallet, ChevronDown, Zap, ExternalLink, Copy, Check } from "lucide-react"
 import Logo from "./logo"
+import { useWallet } from "@/hooks/use-wallet"
+import { ConnectButton } from "@rainbow-me/rainbowkit"
 
 export default function Header() {
   const [menuOpen, setMenuOpen] = useState(false)
   const [walletOpen, setWalletOpen] = useState(false)
+  const [copied, setCopied] = useState(false)
+  
+  const { 
+    address, 
+    isConnected, 
+    isConnecting,
+    shortAddress, 
+    vibeBalanceFormatted, 
+    nativeBalance,
+    nativeSymbol,
+    chainName,
+    disconnect,
+    explorerUrl,
+  } = useWallet()
 
-  const walletAddress = "0x742d...89Ac"
-  const isConnected = true
-  const tokenBalance = 425
+  const copyAddress = () => {
+    if (address) {
+      navigator.clipboard.writeText(address)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    }
+  }
 
   return (
     <header className="sticky top-0 z-50 border-b border-border bg-card/50 backdrop-blur-xl animate-slide-in-down">
@@ -48,57 +68,110 @@ export default function Header() {
 
         {/* Wallet + Mobile Menu */}
         <div className="flex items-center gap-3 md:gap-4">
-          <div className="relative group">
-            <button
-              onClick={() => setWalletOpen(!walletOpen)}
-              className="btn-primary gap-2 relative text-sm md:text-base transition-all duration-300"
-            >
-              <Wallet className="h-4 w-4 md:h-5 md:w-5" />
-              <span className="hidden sm:inline">{isConnected ? walletAddress : "Connect Wallet"}</span>
-              <span className="sm:hidden">Wallet</span>
+          {isConnected ? (
+            <div className="relative group">
+              <button
+                onClick={() => setWalletOpen(!walletOpen)}
+                className="btn-primary gap-2 relative text-sm md:text-base transition-all duration-300"
+              >
+                <Wallet className="h-4 w-4 md:h-5 md:w-5" />
+                <span className="hidden sm:inline">{shortAddress}</span>
+                <span className="sm:hidden">Wallet</span>
 
-              {isConnected && (
                 <span className="ml-1 inline-flex items-center gap-1 bg-white/10 px-2 py-0.5 rounded text-xs font-bold">
                   <Zap className="h-3 w-3" />
-                  {tokenBalance}
+                  {vibeBalanceFormatted}
                 </span>
-              )}
 
-              <ChevronDown
-                className="h-4 w-4 transition-transform duration-300"
-                style={{
-                  transform: walletOpen ? "rotate(180deg)" : "rotate(0deg)",
-                }}
-              />
-            </button>
+                <ChevronDown
+                  className="h-4 w-4 transition-transform duration-300"
+                  style={{
+                    transform: walletOpen ? "rotate(180deg)" : "rotate(0deg)",
+                  }}
+                />
+              </button>
 
-            {/* Wallet Dropdown */}
-            {walletOpen && (
-              <div className="absolute right-0 mt-2 w-56 bg-card/95 backdrop-blur-xl border border-border rounded-xl shadow-2xl shadow-primary/20 animate-scale-in origin-top-right">
-                <div className="p-4 space-y-3 text-sm">
-                  {isConnected ? (
-                    <>
-                      <div className="px-3 py-3 rounded-lg bg-gradient-to-br from-primary/10 to-secondary/10 border border-primary/20">
-                        <p className="text-xs text-muted-foreground font-medium mb-1">Connected Wallet</p>
-                        <p className="font-mono text-xs font-bold text-foreground">{walletAddress}</p>
+              {/* Wallet Dropdown */}
+              {walletOpen && (
+                <div className="absolute right-0 mt-2 w-64 bg-card/95 backdrop-blur-xl border border-border rounded-xl shadow-2xl shadow-primary/20 animate-scale-in origin-top-right">
+                  <div className="p-4 space-y-3 text-sm">
+                    {/* Connected Wallet */}
+                    <div className="px-3 py-3 rounded-lg bg-gradient-to-br from-primary/10 to-secondary/10 border border-primary/20">
+                      <div className="flex items-center justify-between mb-1">
+                        <p className="text-xs text-muted-foreground font-medium">Connected Wallet</p>
+                        <span className="text-xs text-primary">{chainName}</span>
                       </div>
-                      <div className="px-3 py-3 rounded-lg bg-accent/10 border border-accent/20">
-                        <p className="text-xs text-muted-foreground font-medium mb-1">VIBE Balance</p>
-                        <p className="font-bold text-accent text-lg">{tokenBalance}</p>
+                      <div className="flex items-center gap-2">
+                        <p className="font-mono text-xs font-bold text-foreground flex-1">{shortAddress}</p>
+                        <button 
+                          onClick={copyAddress}
+                          className="p-1 hover:bg-white/10 rounded transition-colors"
+                          title="Copy address"
+                        >
+                          {copied ? (
+                            <Check className="h-3 w-3 text-success" />
+                          ) : (
+                            <Copy className="h-3 w-3 text-muted-foreground" />
+                          )}
+                        </button>
+                        {explorerUrl && (
+                          <a 
+                            href={explorerUrl} 
+                            target="_blank" 
+                            rel="noopener noreferrer"
+                            className="p-1 hover:bg-white/10 rounded transition-colors"
+                            title="View on explorer"
+                          >
+                            <ExternalLink className="h-3 w-3 text-muted-foreground" />
+                          </a>
+                        )}
                       </div>
-                      <button className="w-full btn-secondary text-xs py-2 transition-all duration-200">
-                        Disconnect
-                      </button>
-                    </>
-                  ) : (
-                    <button className="w-full btn-primary text-xs py-2 transition-all duration-200">
-                      Connect MetaMask
+                    </div>
+                    
+                    {/* VIBE Balance */}
+                    <div className="px-3 py-3 rounded-lg bg-accent/10 border border-accent/20">
+                      <p className="text-xs text-muted-foreground font-medium mb-1">VIBE Balance</p>
+                      <p className="font-bold text-accent text-lg">{vibeBalanceFormatted} VIBE</p>
+                    </div>
+                    
+                    {/* Native Balance */}
+                    <div className="px-3 py-2 rounded-lg bg-muted/30">
+                      <p className="text-xs text-muted-foreground font-medium mb-1">Native Balance</p>
+                      <p className="font-semibold text-sm">{parseFloat(nativeBalance).toFixed(4)} {nativeSymbol}</p>
+                    </div>
+                    
+                    <button 
+                      onClick={() => {
+                        disconnect()
+                        setWalletOpen(false)
+                      }}
+                      className="w-full btn-secondary text-xs py-2 transition-all duration-200"
+                    >
+                      Disconnect
                     </button>
-                  )}
+                  </div>
                 </div>
-              </div>
-            )}
-          </div>
+              )}
+            </div>
+          ) : (
+            <ConnectButton.Custom>
+              {({ openConnectModal }) => (
+                <button
+                  onClick={openConnectModal}
+                  disabled={isConnecting}
+                  className="btn-primary gap-2 text-sm md:text-base disabled:opacity-50"
+                >
+                  <Wallet className="h-4 w-4 md:h-5 md:w-5" />
+                  {isConnecting ? (
+                    <span>Connecting...</span>
+                  ) : (
+                    <span className="hidden sm:inline">Connect Wallet</span>
+                  )}
+                  <span className="sm:hidden">{isConnecting ? "..." : "Connect"}</span>
+                </button>
+              )}
+            </ConnectButton.Custom>
+          )}
 
           {/* Mobile Menu Toggle */}
           <button
@@ -117,6 +190,12 @@ export default function Header() {
       {/* Mobile Menu */}
       {menuOpen && (
         <div className="md:hidden border-t border-border bg-card/50 backdrop-blur-xl p-4 space-y-2 animate-slide-in-down">
+          {isConnected && (
+            <div className="flex items-center gap-2 px-4 py-2 bg-accent/10 rounded-lg mb-2">
+              <Zap className="h-4 w-4 text-accent" />
+              <span className="text-sm font-bold text-accent">{vibeBalanceFormatted} VIBE</span>
+            </div>
+          )}
           {[
             { label: "Questions", href: "/questions" },
             { label: "Ask", href: "/ask" },
@@ -126,12 +205,21 @@ export default function Header() {
             <Link
               key={item.label}
               href={item.href}
+              onClick={() => setMenuOpen(false)}
               className="block text-sm font-medium text-muted-foreground hover:text-primary px-4 py-3 rounded-lg hover:bg-muted/50 transition-all duration-200"
             >
               {item.label}
             </Link>
           ))}
         </div>
+      )}
+      
+      {/* Click outside to close wallet dropdown */}
+      {walletOpen && (
+        <div 
+          className="fixed inset-0 z-40" 
+          onClick={() => setWalletOpen(false)}
+        />
       )}
     </header>
   )

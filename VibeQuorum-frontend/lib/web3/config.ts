@@ -1,41 +1,39 @@
 import { http, createConfig } from 'wagmi'
-import { mainnet, sepolia, bscTestnet, polygon } from 'wagmi/chains'
+import { baseSepolia, sepolia, bscTestnet } from 'wagmi/chains'
 import { injected, metaMask, walletConnect } from 'wagmi/connectors'
 
-// Contract addresses - UPDATE AFTER DEPLOYMENT
+// Contract addresses - DEPLOYED on Base Sepolia Dec 5, 2025
 export const CONTRACT_ADDRESSES = {
-  vibeToken: process.env.NEXT_PUBLIC_VIBE_TOKEN_ADDRESS || '',
-  rewardManager: process.env.NEXT_PUBLIC_REWARD_MANAGER_ADDRESS || '',
+  vibeToken: process.env.NEXT_PUBLIC_VIBE_TOKEN_ADDRESS!,
+  rewardManager: process.env.NEXT_PUBLIC_REWARD_MANAGER_ADDRESS!,
 } as const
 
-// Supported chains for VibeQuorum
-export const SUPPORTED_CHAINS = [sepolia, bscTestnet] as const
+// Supported chains for VibeQuorum - Base Sepolia is primary
+export const SUPPORTED_CHAINS = [baseSepolia, sepolia, bscTestnet] as const
 
 // Chain names for display
 export const CHAIN_NAMES: Record<number, string> = {
-  1: 'Ethereum',
+  84532: 'Base Sepolia',
   11155111: 'Sepolia',
   97: 'BSC Testnet',
-  137: 'Polygon',
 }
 
 // Block explorer URLs
 export const BLOCK_EXPLORERS: Record<number, string> = {
-  1: 'https://etherscan.io',
+  84532: 'https://sepolia.basescan.org',
   11155111: 'https://sepolia.etherscan.io',
   97: 'https://testnet.bscscan.com',
-  137: 'https://polygonscan.com',
 }
 
 // Get explorer URL for transaction
 export const getExplorerTxUrl = (chainId: number, txHash: string): string => {
-  const base = BLOCK_EXPLORERS[chainId] || BLOCK_EXPLORERS[11155111]
+  const base = BLOCK_EXPLORERS[chainId] || BLOCK_EXPLORERS[84532]
   return `${base}/tx/${txHash}`
 }
 
 // Get explorer URL for address
 export const getExplorerAddressUrl = (chainId: number, address: string): string => {
-  const base = BLOCK_EXPLORERS[chainId] || BLOCK_EXPLORERS[11155111]
+  const base = BLOCK_EXPLORERS[chainId] || BLOCK_EXPLORERS[84532]
   return `${base}/address/${address}`
 }
 
@@ -46,15 +44,15 @@ export const wagmiConfig = createConfig({
     injected(),
     metaMask(),
     walletConnect({
-      projectId: process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID || 'demo',
+      projectId: process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID!,
     }),
   ],
   transports: {
+    [baseSepolia.id]: http(process.env.NEXT_PUBLIC_BASE_SEPOLIA_RPC_URL!),
     [sepolia.id]: http(process.env.NEXT_PUBLIC_SEPOLIA_RPC_URL),
     [bscTestnet.id]: http(process.env.NEXT_PUBLIC_BSC_TESTNET_RPC_URL),
   },
 })
 
-// Default chain ID
-export const DEFAULT_CHAIN_ID = sepolia.id
-
+// Default chain ID - Base Sepolia
+export const DEFAULT_CHAIN_ID = baseSepolia.id

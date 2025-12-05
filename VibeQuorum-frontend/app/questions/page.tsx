@@ -1,52 +1,14 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useMemo } from "react"
 import Header from "@/components/header"
 import Footer from "@/components/footer"
 import QuestionCard from "@/components/question-card"
-import { Search, Plus, Filter } from "lucide-react"
+import { Search, Plus, Filter, Loader2 } from "lucide-react"
 import Link from "next/link"
+import { useQuestions } from "@/hooks/use-questions"
 
-const QUESTIONS = [
-  {
-    id: 1,
-    title: "Why does my ERC20 transfer revert on Goerli testnet?",
-    excerpt:
-      "I'm implementing an ERC20 token contract and transfers are reverting. I've set up the contract with OpenZeppelin but...",
-    author: "0x742d...89Ac",
-    displayName: "alice.eth",
-    tags: ["solidity", "erc20"],
-    answers: 3,
-    upvotes: 24,
-    createdAt: "2 hours ago",
-    acceptedAnswer: true,
-  },
-  {
-    id: 2,
-    title: "Best practices for secure contract upgrades",
-    excerpt:
-      "What are the best patterns for upgrading contracts while maintaining security? I've been reading about proxy patterns...",
-    author: "0x8a14...3Ff2",
-    displayName: "bob.dev",
-    tags: ["security", "proxy", "contract"],
-    answers: 5,
-    upvotes: 42,
-    createdAt: "5 hours ago",
-    acceptedAnswer: true,
-  },
-  {
-    id: 3,
-    title: "How to integrate MetaMask in React app",
-    excerpt: "I need to connect MetaMask to my React application. I've tried using web3.js but I'm not sure about...",
-    author: "0x1234...5678",
-    displayName: "charlie.web3",
-    tags: ["web3", "react", "tooling"],
-    answers: 7,
-    upvotes: 31,
-    createdAt: "1 day ago",
-    acceptedAnswer: false,
-  },
-]
+const TAGS = ["solidity", "erc20", "security", "proxy", "web3", "react", "contract", "tooling", "defi", "nft", "debugging", "upgrades", "metamask"]
 
 export default function QuestionsPage() {
   const [searchQuery, setSearchQuery] = useState("")
@@ -54,8 +16,19 @@ export default function QuestionsPage() {
   const [sortBy, setSortBy] = useState("newest")
   const [filtersOpen, setFiltersOpen] = useState(false)
   const [isDesktop, setIsDesktop] = useState(false)
+  const [debouncedSearch, setDebouncedSearch] = useState("")
 
-  const TAGS = ["solidity", "erc20", "security", "proxy", "web3", "react", "contract", "tooling", "defi", "nft"]
+  // Debounce search
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedSearch(searchQuery), 300)
+    return () => clearTimeout(timer)
+  }, [searchQuery])
+
+  const { questions, loading, totalCount } = useQuestions({
+    searchQuery: debouncedSearch,
+    tags: selectedTags,
+    sortBy,
+  })
 
   useEffect(() => {
     const checkDesktop = () => setIsDesktop(window.innerWidth >= 1024)
@@ -67,6 +40,22 @@ export default function QuestionsPage() {
   const toggleTag = (tag: string) => {
     setSelectedTags((prev) => (prev.includes(tag) ? prev.filter((t) => t !== tag) : [...prev, tag]))
   }
+
+  // Format question data for QuestionCard
+  const formattedQuestions = useMemo(() => {
+    return questions.map(q => ({
+      id: q.id,
+      title: q.title,
+      excerpt: q.description.slice(0, 150) + (q.description.length > 150 ? "..." : ""),
+      author: q.author.slice(0, 6) + "..." + q.author.slice(-4),
+      displayName: q.displayName,
+      tags: q.tags,
+      answers: q.answersCount,
+      upvotes: q.votesCount,
+      createdAt: formatTimeAgo(q.createdAt),
+      acceptedAnswer: q.status === 'closed',
+    }))
+  }, [questions])
 
   return (
     <main className="min-h-screen bg-background">
@@ -102,7 +91,7 @@ export default function QuestionsPage() {
                 {/* Tags Filter */}
                 <div>
                   <h3 className="font-semibold text-sm mb-3">Tags</h3>
-                  <div className="space-y-2">
+                  <div className="space-y-2 max-h-64 overflow-y-auto">
                     {TAGS.map((tag) => (
                       <button
                         key={tag}
@@ -117,6 +106,14 @@ export default function QuestionsPage() {
                       </button>
                     ))}
                   </div>
+                  {selectedTags.length > 0 && (
+                    <button
+                      onClick={() => setSelectedTags([])}
+                      className="w-full mt-2 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                    >
+                      Clear filters
+                    </button>
+                  )}
                 </div>
               </div>
             )}
@@ -144,10 +141,27 @@ export default function QuestionsPage() {
               </Link>
             </div>
 
+            {/* Results info */}
+            <div className="text-sm text-muted-foreground">
+              {loading ? (
+                <span className="flex items-center gap-2">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Loading...
+                </span>
+              ) : (
+                <span>{totalCount} question{totalCount !== 1 ? 's' : ''} found</span>
+              )}
+            </div>
+
             {/* Questions List */}
             <div className="space-y-3">
-              {QUESTIONS.length > 0 ? (
-                QUESTIONS.map((q, idx) => (
+              {loading ? (
+                <div className="text-center py-16 space-y-4 card-base animate-pulse">
+                  <Loader2 className="h-8 w-8 animate-spin mx-auto text-primary" />
+                  <p className="text-muted-foreground">Loading questions...</p>
+                </div>
+              ) : formattedQuestions.length > 0 ? (
+                formattedQuestions.map((q, idx) => (
                   <div key={q.id} className="animate-slide-in-up" style={{ animationDelay: `${idx * 50}ms` }}>
                     <QuestionCard {...q} />
                   </div>
@@ -163,16 +177,30 @@ export default function QuestionsPage() {
               )}
             </div>
 
-            {/* Pagination */}
-            <div className="flex items-center justify-center gap-2 pt-8">
-              <button className="btn-secondary text-sm">Previous</button>
-              <span className="text-sm text-muted-foreground px-4">Page 1 of 3</span>
-              <button className="btn-primary text-sm">Next</button>
-            </div>
+            {/* Pagination placeholder */}
+            {formattedQuestions.length > 0 && (
+              <div className="flex items-center justify-center gap-2 pt-8">
+                <span className="text-sm text-muted-foreground px-4">
+                  Showing {formattedQuestions.length} of {totalCount} questions
+                </span>
+              </div>
+            )}
           </div>
         </div>
       </div>
       <Footer />
     </main>
   )
+}
+
+function formatTimeAgo(dateString: string): string {
+  const date = new Date(dateString)
+  const now = new Date()
+  const seconds = Math.floor((now.getTime() - date.getTime()) / 1000)
+  
+  if (seconds < 60) return 'just now'
+  if (seconds < 3600) return `${Math.floor(seconds / 60)} min ago`
+  if (seconds < 86400) return `${Math.floor(seconds / 3600)} hours ago`
+  if (seconds < 604800) return `${Math.floor(seconds / 86400)} days ago`
+  return date.toLocaleDateString()
 }

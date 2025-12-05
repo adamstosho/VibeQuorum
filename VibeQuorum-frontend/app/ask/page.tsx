@@ -1,20 +1,30 @@
 "use client"
 
 import { useState } from "react"
+import { useRouter } from "next/navigation"
 import Header from "@/components/header"
 import Footer from "@/components/footer"
-import { Bold, Italic, Code2, Plus, ArrowLeft, Eye, EyeOff } from "lucide-react"
+import { Bold, Italic, Code2, Plus, ArrowLeft, Eye, EyeOff, Loader2, AlertCircle, Wallet } from "lucide-react"
 import Link from "next/link"
+import { useWallet } from "@/hooks/use-wallet"
+import { useQuestions } from "@/hooks/use-questions"
+import { ConnectButton } from "@rainbow-me/rainbowkit"
 
 export default function AskPage() {
+  const router = useRouter()
+  const { address, isConnected, shortAddress } = useWallet()
+  const { createQuestion } = useQuestions()
+  
   const [title, setTitle] = useState("")
   const [description, setDescription] = useState("")
   const [tags, setTags] = useState<string[]>([])
   const [tagInput, setTagInput] = useState("")
   const [showPreview, setShowPreview] = useState(false)
+  const [isSubmitting, setIsSubmitting] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
   const addTag = () => {
-    if (tagInput.trim() && tags.length < 5) {
+    if (tagInput.trim() && tags.length < 5 && !tags.includes(tagInput.trim().toLowerCase())) {
       setTags([...tags, tagInput.trim().toLowerCase()])
       setTagInput("")
     }
@@ -25,6 +35,57 @@ export default function AskPage() {
   }
 
   const suggestedTags = ["solidity", "erc20", "web3", "react", "security", "proxy", "defi", "nft"]
+
+  const handleSubmit = async () => {
+    if (!isConnected || !address) {
+      setError("Please connect your wallet first")
+      return
+    }
+
+    if (!title.trim()) {
+      setError("Please enter a title")
+      return
+    }
+
+    if (title.trim().length < 10) {
+      setError("Title must be at least 10 characters")
+      return
+    }
+
+    if (!description.trim()) {
+      setError("Please enter a description")
+      return
+    }
+
+    if (description.trim().length < 30) {
+      setError("Description must be at least 30 characters")
+      return
+    }
+
+    if (tags.length === 0) {
+      setError("Please add at least one tag")
+      return
+    }
+
+    setError(null)
+    setIsSubmitting(true)
+
+    try {
+      const question = createQuestion({
+        title: title.trim(),
+        description: description.trim(),
+        tags,
+        author: address,
+        displayName: shortAddress,
+      })
+
+      // Redirect to the new question
+      router.push(`/questions/${question.id}`)
+    } catch (err) {
+      setError("Failed to create question. Please try again.")
+      setIsSubmitting(false)
+    }
+  }
 
   return (
     <main className="min-h-screen bg-background">
@@ -47,6 +108,39 @@ export default function AskPage() {
             </p>
           </div>
 
+          {/* Wallet Connection Warning */}
+          {!isConnected && (
+            <div className="bg-warning/10 border border-warning/30 rounded-lg p-4 flex items-start gap-3">
+              <Wallet className="h-5 w-5 text-warning flex-shrink-0 mt-0.5" />
+              <div className="flex-1">
+                <p className="text-sm font-medium text-warning">Wallet not connected</p>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Connect your wallet to ask questions and earn VIBE rewards.
+                </p>
+                <div className="mt-3">
+                  <ConnectButton.Custom>
+                    {({ openConnectModal }) => (
+                      <button
+                        onClick={openConnectModal}
+                        className="btn-primary text-sm py-2 px-4"
+                      >
+                        Connect Wallet
+                      </button>
+                    )}
+                  </ConnectButton.Custom>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Error Message */}
+          {error && (
+            <div className="bg-destructive/10 border border-destructive/30 rounded-lg p-4 flex items-center gap-3">
+              <AlertCircle className="h-5 w-5 text-destructive flex-shrink-0" />
+              <p className="text-sm text-destructive">{error}</p>
+            </div>
+          )}
+
           {/* Title */}
           <div className="space-y-2 animate-slide-in-up" style={{ animationDelay: "50ms" }}>
             <label className="text-sm font-semibold">Question Title *</label>
@@ -57,6 +151,7 @@ export default function AskPage() {
               placeholder="e.g. Why does my ERC20 transfer revert?"
               className="w-full bg-muted p-3 rounded text-sm focus:outline-none focus:ring-2 focus:ring-primary transition-all duration-200"
               maxLength={120}
+              disabled={isSubmitting}
             />
             <p className="text-xs text-muted-foreground">{title.length}/120 • Be specific and descriptive</p>
           </div>
@@ -105,6 +200,7 @@ export default function AskPage() {
                   onChange={(e) => setDescription(e.target.value)}
                   placeholder="Describe your problem in detail. Include code snippets, error messages, and what you've already tried."
                   className="w-full h-48 bg-background p-3 text-sm focus:outline-none resize-none"
+                  disabled={isSubmitting}
                 />
               ) : (
                 <div className="w-full h-48 bg-background p-3 text-sm overflow-auto">
@@ -115,18 +211,22 @@ export default function AskPage() {
               )}
             </div>
 
-            <p className="text-xs text-muted-foreground">{description.length} characters</p>
+            <p className="text-xs text-muted-foreground">{description.length} characters • Min 30 required</p>
           </div>
 
           {/* Tags */}
           <div className="space-y-2 animate-slide-in-up" style={{ animationDelay: "150ms" }}>
-            <label className="text-sm font-semibold">Tags (1-5)</label>
+            <label className="text-sm font-semibold">Tags (1-5) *</label>
 
             <div className="flex flex-wrap gap-2 mb-3">
               {tags.map((tag) => (
                 <span key={tag} className="badge gap-2 bg-primary text-primary-foreground">
                   {tag}
-                  <button onClick={() => removeTag(tag)} className="hover:opacity-70 transition-opacity duration-200">
+                  <button 
+                    onClick={() => removeTag(tag)} 
+                    className="hover:opacity-70 transition-opacity duration-200"
+                    disabled={isSubmitting}
+                  >
                     ×
                   </button>
                 </span>
@@ -141,10 +241,11 @@ export default function AskPage() {
                 onKeyPress={(e) => e.key === "Enter" && (e.preventDefault(), addTag())}
                 placeholder="Add tags..."
                 className="flex-1 bg-muted p-2 rounded text-sm focus:outline-none focus:ring-2 focus:ring-primary transition-all duration-200"
+                disabled={isSubmitting}
               />
               <button
                 onClick={addTag}
-                disabled={tags.length >= 5}
+                disabled={tags.length >= 5 || isSubmitting}
                 className="btn-secondary gap-2 disabled:opacity-50 transition-all duration-200"
               >
                 <Plus className="h-4 w-4" />
@@ -159,7 +260,7 @@ export default function AskPage() {
                   <button
                     key={tag}
                     onClick={() => !tags.includes(tag) && tags.length < 5 && setTags([...tags, tag])}
-                    disabled={tags.includes(tag) || tags.length >= 5}
+                    disabled={tags.includes(tag) || tags.length >= 5 || isSubmitting}
                     className="text-xs px-2 py-1 rounded bg-muted hover:bg-muted/70 disabled:opacity-50 transition-all duration-200"
                   >
                     {tag}
@@ -174,7 +275,20 @@ export default function AskPage() {
             className="flex gap-3 pt-4 border-t border-border animate-slide-in-up"
             style={{ animationDelay: "200ms" }}
           >
-            <button className="btn-primary flex-1 hover:shadow-lg transition-all duration-200">Publish Question</button>
+            <button 
+              onClick={handleSubmit}
+              disabled={isSubmitting || !isConnected}
+              className="btn-primary flex-1 hover:shadow-lg transition-all duration-200 disabled:opacity-50 gap-2"
+            >
+              {isSubmitting ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Publishing...
+                </>
+              ) : (
+                "Publish Question"
+              )}
+            </button>
             <Link href="/questions" className="btn-secondary hover:shadow-lg transition-all duration-200">
               Cancel
             </Link>

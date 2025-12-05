@@ -1,80 +1,172 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect, useMemo } from "react"
 import Header from "@/components/header"
 import Footer from "@/components/footer"
-import { CheckCircle, Clock, Zap, AlertCircle } from "lucide-react"
+import { CheckCircle, Clock, Zap, AlertCircle, Shield, Loader2, ExternalLink, Wallet } from "lucide-react"
+import { useWallet } from "@/hooks/use-wallet"
+import { useVibeToken, useRewardManager } from "@/hooks/use-contracts"
+import { ConnectButton } from "@rainbow-me/rainbowkit"
+import { questionStore, answerStore } from "@/lib/stores/questions"
 
 export default function AdminPage() {
-  const [selectedRewards, setSelectedRewards] = useState<number[]>([])
+  const { address, isConnected, shortAddress, chainName } = useWallet()
+  const { hasRole: hasTokenRole, isAdmin: isTokenAdmin } = useVibeToken()
+  const { 
+    hasRole: hasRewardRole, 
+    isAdmin: isRewardAdmin,
+    rewardAcceptedAnswer,
+    rewardUpvoteThreshold,
+    isPending,
+    lastTxHash,
+    dailyDistributed,
+    dailyLimit,
+  } = useRewardManager()
+  
+  const [selectedRewards, setSelectedRewards] = useState<string[]>([])
   const [showConfirmation, setShowConfirmation] = useState(false)
+  const [questions, setQuestions] = useState<any[]>([])
+  const [answers, setAnswers] = useState<any[]>([])
+  const [isLoading, setIsLoading] = useState(true)
+  const [txStatus, setTxStatus] = useState<'idle' | 'pending' | 'success' | 'error'>('idle')
 
-  const pendingRewards = [
-    {
-      id: 1,
-      questionTitle: "Why does my ERC20 transfer revert?",
-      answerer: "0x8a14...3Ff2",
-      amount: 50,
-      status: "pending" as const,
-      upvotes: 18,
-    },
-    {
-      id: 2,
-      questionTitle: "Best practices for contract upgrades",
-      answerer: "0x1234...5678",
-      amount: 50,
-      status: "pending" as const,
-      upvotes: 25,
-    },
-    {
-      id: 3,
-      questionTitle: "MetaMask integration guide",
-      answerer: "0x742d...89Ac",
-      amount: 75,
-      status: "scheduled" as const,
-      upvotes: 31,
-    },
-  ]
+  // Check if user has admin access
+  const isAdmin = isTokenAdmin || isRewardAdmin
 
-  const recentTransactions = [
-    {
-      id: 1,
-      action: "Answer Accepted - ERC20 Revert",
-      amount: 50,
-      wallet: "0x8a14...3Ff2",
-      hash: "0x1234...5678",
-      status: "success" as const,
-      timestamp: "2 hours ago",
-    },
-    {
-      id: 2,
-      action: "Answer Accepted - Contract Upgrades",
-      amount: 50,
-      wallet: "0x1234...5678",
-      hash: "0x5678...abcd",
-      status: "success" as const,
-      timestamp: "1 day ago",
-    },
-    {
-      id: 3,
-      action: "Batch Reward Trigger",
-      amount: 300,
-      wallet: "Platform",
-      hash: "0xabcd...ef12",
-      status: "pending" as const,
-      timestamp: "pending",
-    },
-  ]
+  // Load data
+  useEffect(() => {
+    setIsLoading(true)
+    const allQuestions = questionStore.getAll()
+    const allAnswers = answerStore.getAll()
+    setQuestions(allQuestions)
+    setAnswers(allAnswers)
+    setIsLoading(false)
+  }, [])
 
-  const metrics = {
-    totalQuestions: 42,
-    totalAnswers: 156,
-    totalVibeDistributed: 4250,
-    averageReward: 65,
+  // Calculate metrics
+  const metrics = useMemo(() => {
+    const acceptedAnswers = answers.filter(a => a.isAccepted)
+    const totalVibe = answers.reduce((sum, a) => sum + (a.vibeReward || 0), 0)
+    
+    return {
+      totalQuestions: questions.length,
+      totalAnswers: answers.length,
+      totalVibeDistributed: totalVibe,
+      averageReward: acceptedAnswers.length > 0 ? Math.round(totalVibe / acceptedAnswers.length) : 0,
+    }
+  }, [questions, answers])
+
+  // Get pending rewards (accepted answers without tx hash)
+  const pendingRewards = useMemo(() => {
+    return answers
+      .filter(a => a.isAccepted && a.txHashes.length === 0)
+      .map(a => {
+        const question = questions.find(q => q.id === a.questionId)
+        return {
+          id: a.id,
+          questionTitle: question?.title || 'Unknown Question',
+          answerer: a.author,
+          displayName: a.displayName,
+          amount: 50, // Standard accepted answer reward
+          status: 'pending' as const,
+          upvotes: a.upvotes,
+        }
+      })
+  }, [answers, questions])
+
+  // Get recent transactions (answers with tx hashes)
+  const recentTransactions = useMemo(() => {
+    return answers
+      .filter(a => a.txHashes.length > 0)
+      .flatMap(a => a.txHashes.map((hash: string, idx: number) => ({
+        id: `${a.id}-${idx}`,
+        action: a.isAccepted ? 'Answer Accepted' : 'Upvote Reward',
+        amount: a.vibeReward,
+        wallet: a.author.slice(0, 6) + '...' + a.author.slice(-4),
+        hash: hash.slice(0, 10) + '...' + hash.slice(-8),
+        fullHash: hash,
+        status: 'success' as const,
+        timestamp: a.createdAt,
+      })))
+      .slice(0, 10)
+  }, [answers])
+
+  const toggleReward = (id: string) => {
+    setSelectedRewards((prev) => (prev.includes(id) ? prev.filter((r) => r !== id) : [...prev, id]))
   }
 
-  const toggleReward = (id: number) => {
-    setSelectedRewards((prev) => (prev.includes(id) ? prev.filter((r) => r !== id) : [...prev, id]))
+  const toggleAll = () => {
+    if (selectedRewards.length === pendingRewards.length) {
+      setSelectedRewards([])
+    } else {
+      setSelectedRewards(pendingRewards.map(r => r.id))
+    }
+  }
+
+  const handleTriggerRewards = async () => {
+    setShowConfirmation(false)
+    setTxStatus('pending')
+    
+    try {
+      // Process each selected reward
+      for (const rewardId of selectedRewards) {
+        const reward = pendingRewards.find(r => r.id === rewardId)
+        if (reward) {
+          const result = await rewardAcceptedAnswer(reward.answerer, rewardId)
+          if (result?.hash) {
+            // Update answer with tx hash
+            answerStore.addTxHash(rewardId, result.hash, 50)
+          }
+        }
+      }
+      
+      setTxStatus('success')
+      setSelectedRewards([])
+      
+      // Refresh data
+      const allAnswers = answerStore.getAll()
+      setAnswers(allAnswers)
+      
+      setTimeout(() => setTxStatus('idle'), 3000)
+    } catch (error) {
+      console.error('Failed to trigger rewards:', error)
+      setTxStatus('error')
+      setTimeout(() => setTxStatus('idle'), 3000)
+    }
+  }
+
+  // Not connected state
+  if (!isConnected) {
+    return (
+      <main className="min-h-screen bg-background">
+        <Header />
+        <div className="container mx-auto max-w-6xl px-4 py-16">
+          <div className="card-base text-center space-y-6 animate-slide-in-up">
+            <div className="h-20 w-20 rounded-full bg-gradient-to-br from-secondary/30 to-primary/30 flex items-center justify-center border-2 border-secondary/50 mx-auto">
+              <Shield className="h-10 w-10 text-secondary" />
+            </div>
+            <div>
+              <h1 className="text-2xl font-bold mb-2">Admin Panel</h1>
+              <p className="text-muted-foreground">
+                Connect your wallet to access admin features.
+              </p>
+            </div>
+            <ConnectButton.Custom>
+              {({ openConnectModal }) => (
+                <button
+                  onClick={openConnectModal}
+                  className="btn-primary gap-2 mx-auto"
+                >
+                  <Wallet className="h-5 w-5" />
+                  Connect Wallet
+                </button>
+              )}
+            </ConnectButton.Custom>
+          </div>
+        </div>
+        <Footer />
+      </main>
+    )
   }
 
   return (
@@ -85,8 +177,32 @@ export default function AdminPage() {
         <div className="flex items-center gap-3 mb-8 animate-slide-in-down">
           <AlertCircle className="h-6 w-6 text-secondary" />
           <h1 className="text-3xl font-bold">Admin Panel</h1>
+          {isAdmin && (
+            <span className="bg-success/20 text-success text-xs px-2 py-1 rounded-full font-medium">
+              Admin Access
+            </span>
+          )}
         </div>
 
+        {/* Admin Status */}
+        <div className="card-base mb-8 animate-slide-in-up">
+          <div className="flex flex-wrap items-center gap-4 text-sm">
+            <div className="flex items-center gap-2">
+              <span className="text-muted-foreground">Connected:</span>
+              <span className="font-mono">{shortAddress}</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-muted-foreground">Network:</span>
+              <span className="font-medium">{chainName}</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-muted-foreground">Daily Distributed:</span>
+              <span className="font-bold text-accent">{dailyDistributed} / {dailyLimit} VIBE</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Metrics */}
         <div className="grid md:grid-cols-4 gap-4 mb-8">
           {[
             { label: "Total Questions", value: metrics.totalQuestions, icon: "📝" },
@@ -105,73 +221,115 @@ export default function AdminPage() {
           ))}
         </div>
 
+        {/* Status Messages */}
+        {txStatus === 'success' && (
+          <div className="bg-success/10 border border-success/30 rounded-lg p-4 mb-8 flex items-center gap-3 animate-slide-in-down">
+            <CheckCircle className="h-5 w-5 text-success" />
+            <span className="text-success font-medium">Rewards triggered successfully!</span>
+          </div>
+        )}
+        
+        {txStatus === 'error' && (
+          <div className="bg-destructive/10 border border-destructive/30 rounded-lg p-4 mb-8 flex items-center gap-3 animate-slide-in-down">
+            <AlertCircle className="h-5 w-5 text-destructive" />
+            <span className="text-destructive font-medium">Failed to trigger rewards. Please try again.</span>
+          </div>
+        )}
+
         {/* Reward Queue */}
         <div className="card-base space-y-4 mb-8 animate-slide-in-up">
           <h2 className="font-semibold text-lg">Reward Queue</h2>
 
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="border-b border-border">
-                <tr className="text-muted-foreground">
-                  <th className="text-left py-2 px-3">
-                    <input type="checkbox" className="rounded cursor-pointer" />
-                  </th>
-                  <th className="text-left py-2 px-3">Question</th>
-                  <th className="text-left py-2 px-3">Answerer</th>
-                  <th className="text-left py-2 px-3">Amount</th>
-                  <th className="text-left py-2 px-3">Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {pendingRewards.map((reward, idx) => (
-                  <tr
-                    key={reward.id}
-                    className="border-b border-border hover:bg-muted/30 transition-all duration-200 animate-slide-in-up"
-                    style={{ animationDelay: `${idx * 50}ms` }}
-                  >
-                    <td className="py-3 px-3">
-                      <input
-                        type="checkbox"
-                        checked={selectedRewards.includes(reward.id)}
-                        onChange={() => toggleReward(reward.id)}
-                        className="rounded cursor-pointer"
-                      />
-                    </td>
-                    <td className="py-3 px-3 font-mono text-xs line-clamp-1">{reward.questionTitle}</td>
-                    <td className="py-3 px-3 font-mono text-xs">{reward.answerer}</td>
-                    <td className="py-3 px-3 font-bold text-accent">{reward.amount} VIBE</td>
-                    <td className="py-3 px-3">
-                      <span
-                        className={`inline-flex items-center gap-1 px-2 py-1 rounded text-xs font-medium transition-all duration-200 ${
-                          reward.status === "pending" ? "bg-warning/20 text-warning" : "bg-primary/20 text-primary"
-                        }`}
+          {isLoading ? (
+            <div className="text-center py-8">
+              <Loader2 className="h-8 w-8 animate-spin mx-auto text-primary" />
+            </div>
+          ) : pendingRewards.length > 0 ? (
+            <>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead className="border-b border-border">
+                    <tr className="text-muted-foreground">
+                      <th className="text-left py-2 px-3">
+                        <input 
+                          type="checkbox" 
+                          className="rounded cursor-pointer"
+                          checked={selectedRewards.length === pendingRewards.length}
+                          onChange={toggleAll}
+                        />
+                      </th>
+                      <th className="text-left py-2 px-3">Question</th>
+                      <th className="text-left py-2 px-3">Answerer</th>
+                      <th className="text-left py-2 px-3">Amount</th>
+                      <th className="text-left py-2 px-3">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {pendingRewards.map((reward, idx) => (
+                      <tr
+                        key={reward.id}
+                        className="border-b border-border hover:bg-muted/30 transition-all duration-200 animate-slide-in-up"
+                        style={{ animationDelay: `${idx * 50}ms` }}
                       >
-                        {reward.status === "pending" ? (
-                          <Clock className="h-3 w-3" />
-                        ) : (
-                          <CheckCircle className="h-3 w-3" />
-                        )}
-                        {reward.status}
-                      </span>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                        <td className="py-3 px-3">
+                          <input
+                            type="checkbox"
+                            checked={selectedRewards.includes(reward.id)}
+                            onChange={() => toggleReward(reward.id)}
+                            className="rounded cursor-pointer"
+                          />
+                        </td>
+                        <td className="py-3 px-3 font-mono text-xs line-clamp-1 max-w-[200px]">{reward.questionTitle}</td>
+                        <td className="py-3 px-3 font-mono text-xs">
+                          {reward.displayName || (reward.answerer.slice(0, 6) + '...' + reward.answerer.slice(-4))}
+                        </td>
+                        <td className="py-3 px-3 font-bold text-accent">{reward.amount} VIBE</td>
+                        <td className="py-3 px-3">
+                          <span className="inline-flex items-center gap-1 px-2 py-1 rounded text-xs font-medium bg-warning/20 text-warning">
+                            <Clock className="h-3 w-3" />
+                            pending
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
 
-          {/* Actions */}
-          <div className="flex gap-2 pt-4 border-t border-border flex-wrap">
-            <button
-              onClick={() => setShowConfirmation(true)}
-              className="btn-primary gap-2 disabled:opacity-50 transition-all duration-200 hover:shadow-lg"
-              disabled={selectedRewards.length === 0}
-            >
-              <Zap className="h-4 w-4" />
-              Trigger {selectedRewards.length > 0 ? `(${selectedRewards.length})` : "Rewards"}
-            </button>
-            <button className="btn-secondary transition-all duration-200 hover:shadow-lg">Clear Selection</button>
-          </div>
+              {/* Actions */}
+              <div className="flex gap-2 pt-4 border-t border-border flex-wrap">
+                <button
+                  onClick={() => setShowConfirmation(true)}
+                  className="btn-primary gap-2 disabled:opacity-50 transition-all duration-200 hover:shadow-lg"
+                  disabled={selectedRewards.length === 0 || txStatus === 'pending'}
+                >
+                  {txStatus === 'pending' ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      Processing...
+                    </>
+                  ) : (
+                    <>
+                      <Zap className="h-4 w-4" />
+                      Trigger {selectedRewards.length > 0 ? `(${selectedRewards.length})` : "Rewards"}
+                    </>
+                  )}
+                </button>
+                <button 
+                  onClick={() => setSelectedRewards([])}
+                  className="btn-secondary transition-all duration-200 hover:shadow-lg"
+                  disabled={selectedRewards.length === 0}
+                >
+                  Clear Selection
+                </button>
+              </div>
+            </>
+          ) : (
+            <div className="text-center py-8 text-muted-foreground">
+              <CheckCircle className="h-8 w-8 mx-auto mb-2 text-success" />
+              <p>No pending rewards</p>
+            </div>
+          )}
 
           {/* Confirmation Modal */}
           {showConfirmation && (
@@ -181,11 +339,20 @@ export default function AdminPage() {
                 <p className="text-sm text-muted-foreground mb-4">
                   This will trigger {selectedRewards.length} reward(s) and mint VIBE tokens on-chain. Are you sure?
                 </p>
+                <div className="bg-muted/30 rounded p-3 mb-4 text-sm">
+                  <p className="text-muted-foreground">Total rewards:</p>
+                  <p className="font-bold text-accent text-lg">{selectedRewards.length * 50} VIBE</p>
+                </div>
                 <div className="flex gap-2">
                   <button onClick={() => setShowConfirmation(false)} className="btn-secondary flex-1">
                     Cancel
                   </button>
-                  <button className="btn-primary flex-1 hover:shadow-lg transition-all duration-200">Confirm</button>
+                  <button 
+                    onClick={handleTriggerRewards}
+                    className="btn-primary flex-1 hover:shadow-lg transition-all duration-200"
+                  >
+                    Confirm
+                  </button>
                 </div>
               </div>
             </div>
@@ -196,45 +363,54 @@ export default function AdminPage() {
         <div className="card-base space-y-4 animate-slide-in-up">
           <h2 className="font-semibold text-lg">Recent Transactions</h2>
 
-          <div className="space-y-3">
-            {recentTransactions.map((tx, idx) => (
-              <div
-                key={tx.id}
-                className="flex flex-col sm:flex-row items-start sm:items-center justify-between p-4 bg-muted/20 rounded border border-border/50 hover:border-primary/50 hover:bg-muted/30 transition-all duration-200 animate-slide-in-up gap-3"
-                style={{ animationDelay: `${idx * 50}ms` }}
-              >
-                <div className="space-y-1 flex-1">
-                  <p className="font-medium text-sm">{tx.action}</p>
-                  <p className="text-xs text-muted-foreground font-mono">{tx.wallet}</p>
-                </div>
+          {recentTransactions.length > 0 ? (
+            <div className="space-y-3">
+              {recentTransactions.map((tx, idx) => (
+                <div
+                  key={tx.id}
+                  className="flex flex-col sm:flex-row items-start sm:items-center justify-between p-4 bg-muted/20 rounded border border-border/50 hover:border-primary/50 hover:bg-muted/30 transition-all duration-200 animate-slide-in-up gap-3"
+                  style={{ animationDelay: `${idx * 50}ms` }}
+                >
+                  <div className="space-y-1 flex-1">
+                    <p className="font-medium text-sm">{tx.action}</p>
+                    <p className="text-xs text-muted-foreground font-mono">{tx.wallet}</p>
+                  </div>
 
-                <div className="flex items-center gap-3 sm:gap-4">
-                  <span className="font-bold text-accent">{tx.amount} VIBE</span>
+                  <div className="flex items-center gap-3 sm:gap-4">
+                    <span className="font-bold text-accent">{tx.amount} VIBE</span>
 
-                  {tx.status === "success" && (
                     <span className="flex items-center gap-1 text-success text-xs whitespace-nowrap">
                       <CheckCircle className="h-4 w-4" />
-                      <a href="#" className="hover:underline font-mono">
-                        {tx.hash}
-                      </a>
+                      <span className="font-mono">{tx.hash}</span>
                     </span>
-                  )}
 
-                  {tx.status === "pending" && (
-                    <span className="flex items-center gap-1 text-warning text-xs whitespace-nowrap">
-                      <Clock className="h-4 w-4 animate-pulse" />
-                      pending
+                    <span className="text-xs text-muted-foreground whitespace-nowrap">
+                      {formatTimeAgo(tx.timestamp)}
                     </span>
-                  )}
-
-                  <span className="text-xs text-muted-foreground whitespace-nowrap">{tx.timestamp}</span>
+                  </div>
                 </div>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          ) : (
+            <div className="text-center py-8 text-muted-foreground">
+              <p>No transactions yet</p>
+            </div>
+          )}
         </div>
       </div>
       <Footer />
     </main>
   )
+}
+
+function formatTimeAgo(dateString: string): string {
+  const date = new Date(dateString)
+  const now = new Date()
+  const seconds = Math.floor((now.getTime() - date.getTime()) / 1000)
+  
+  if (seconds < 60) return 'just now'
+  if (seconds < 3600) return `${Math.floor(seconds / 60)} min ago`
+  if (seconds < 86400) return `${Math.floor(seconds / 3600)} hours ago`
+  if (seconds < 604800) return `${Math.floor(seconds / 86400)} days ago`
+  return date.toLocaleDateString()
 }
