@@ -113,22 +113,54 @@ export default function QuestionDetailPage() {
 
   // Handle accept answer
   const handleAcceptAnswer = async (answerId: string, answererAddress: string) => {
-    if (!isConnected || !isQuestionOwner) return
+    if (!isConnected || !isQuestionOwner || !address) return
     
     setIsAccepting(answerId)
+    setError(null)
     
     try {
-      // First accept the answer locally
-      acceptAnswer(answerId)
+      // Sign request for backend authentication
+      const { signature, timestamp } = await signRequest()
       
-      // Then try to trigger on-chain reward
-      const result = await rewardAcceptedAnswer(answererAddress, questionId)
+      // Call backend API to accept answer (backend will auto-trigger reward)
+      const result = await api.questions.acceptAnswer(
+        questionId,
+        answerId,
+        address,
+        signature,
+        timestamp
+      )
       
-      if (result?.hash) {
-        addRewardToAnswer(answerId, result.hash, 50)
+      // Update local state
+      if (result?.data?.answer) {
+        // Refresh answers to get updated data from backend (including rewards)
+        acceptAnswer(answerId)
+        
+        // If reward was triggered, update with tx hash and amount
+        if (result.data.reward?.txHash) {
+          const rewardAmount = result.data.reward.amount 
+            ? Number(result.data.reward.amount) / 1e18 // Convert from wei to VIBE
+            : 50 // Default fallback
+          addRewardToAnswer(answerId, result.data.reward.txHash, rewardAmount)
+          
+          // Show success message
+          setError(null)
+          console.log('✅ Reward distributed:', result.data.reward.txHash)
+        } else if (result.data.rewardError) {
+          // Reward failed but answer was accepted
+          // Admin can trigger reward manually later
+          console.warn('Answer accepted but reward failed:', result.data.rewardError)
+          setError('Answer accepted! Reward will be processed by admin.')
+        }
+        
+        // Refresh answers after a short delay to get updated reward data from backend
+        setTimeout(() => {
+          acceptAnswer(answerId) // Refresh again to get updated data
+        }, 3000) // Wait 3 seconds for blockchain transaction to be confirmed and indexed
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error("Failed to accept answer:", err)
+      setError(err.message || "Failed to accept answer. Please try again.")
     } finally {
       setIsAccepting(null)
     }

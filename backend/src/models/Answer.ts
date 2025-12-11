@@ -9,6 +9,7 @@ export interface IAnswer extends Document {
   aiGenerated: boolean;
   isAccepted: boolean;
   txHashes: string[]; // reward transaction hashes
+  vibeReward: number; // total VIBE tokens rewarded (in wei, converted to readable format)
   createdAt: Date;
   updatedAt: Date;
 }
@@ -54,6 +55,11 @@ const AnswerSchema = new Schema<IAnswer>(
     txHashes: {
       type: [String],
       default: [],
+    },
+    vibeReward: {
+      type: Number,
+      default: 0,
+      min: 0,
     },
   },
   {

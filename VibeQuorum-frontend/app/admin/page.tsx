@@ -7,7 +7,9 @@ import { CheckCircle, Clock, Zap, AlertCircle, Shield, Loader2, ExternalLink, Wa
 import { useWallet } from "@/hooks/use-wallet"
 import { useVibeToken, useRewardManager } from "@/hooks/use-contracts"
 import { ConnectButton } from "@rainbow-me/rainbowkit"
-import { questionStore, answerStore } from "@/lib/stores/questions"
+import { useQuestions } from "@/hooks/use-questions"
+import { api } from "@/lib/api"
+import { useApiAuth } from "@/hooks/use-api-auth"
 
 export default function AdminPage() {
   const { address, isConnected, shortAddress, chainName } = useWallet()
@@ -25,71 +27,105 @@ export default function AdminPage() {
   
   const [selectedRewards, setSelectedRewards] = useState<string[]>([])
   const [showConfirmation, setShowConfirmation] = useState(false)
-  const [questions, setQuestions] = useState<any[]>([])
-  const [answers, setAnswers] = useState<any[]>([])
-  const [isLoading, setIsLoading] = useState(true)
   const [txStatus, setTxStatus] = useState<'idle' | 'pending' | 'success' | 'error'>('idle')
 
   // Check if user has admin access
+  // undefined = still checking, true = admin, false = not admin
   const isAdmin = isTokenAdmin || isRewardAdmin
+  const isCheckingAdmin = isTokenAdmin === undefined && isRewardAdmin === undefined
 
-  // Load data
+  // Load data from API
+  const { questions, loading: questionsLoading, refresh: refreshQuestions } = useQuestions()
+  // For admin panel, we need all answers across all questions
+  // Since useAnswers requires a questionId, we'll fetch them separately
+  const [allAnswers, setAllAnswers] = useState<any[]>([])
+  const [isLoadingAnswers, setIsLoadingAnswers] = useState(true)
+
   useEffect(() => {
-    setIsLoading(true)
-    const allQuestions = questionStore.getAll()
-    const allAnswers = answerStore.getAll()
-    setQuestions(allQuestions)
-    setAnswers(allAnswers)
-    setIsLoading(false)
-  }, [])
+    const fetchAllAnswers = async () => {
+      setIsLoadingAnswers(true)
+      try {
+        // Fetch answers for each question
+        const answerPromises = questions.map(async (q) => {
+          try {
+            const result = await api.answers.list(q.id)
+            return result?.answers || []
+          } catch (error) {
+            console.error(`Failed to fetch answers for question ${q.id}:`, error)
+            return []
+          }
+        })
+        const answersArrays = await Promise.all(answerPromises)
+        const flatAnswers = answersArrays.flat()
+        setAllAnswers(flatAnswers)
+      } catch (error) {
+        console.error('Failed to fetch answers:', error)
+      } finally {
+        setIsLoadingAnswers(false)
+      }
+    }
+
+    if (questions.length > 0) {
+      fetchAllAnswers()
+    } else if (!questionsLoading) {
+      setIsLoadingAnswers(false)
+    }
+  }, [questions, questionsLoading])
+
+  const isLoading = questionsLoading || isLoadingAnswers
 
   // Calculate metrics
   const metrics = useMemo(() => {
-    const acceptedAnswers = answers.filter(a => a.isAccepted)
-    const totalVibe = answers.reduce((sum, a) => sum + (a.vibeReward || 0), 0)
+    const acceptedAnswers = allAnswers.filter(a => a.isAccepted)
+    const totalVibe = allAnswers.reduce((sum, a) => sum + (a.vibeReward || 0), 0)
     
     return {
       totalQuestions: questions.length,
-      totalAnswers: answers.length,
+      totalAnswers: allAnswers.length,
       totalVibeDistributed: totalVibe,
       averageReward: acceptedAnswers.length > 0 ? Math.round(totalVibe / acceptedAnswers.length) : 0,
     }
-  }, [questions, answers])
+  }, [questions, allAnswers])
 
   // Get pending rewards (accepted answers without tx hash)
   const pendingRewards = useMemo(() => {
-    return answers
-      .filter(a => a.isAccepted && a.txHashes.length === 0)
+    return allAnswers
+      .filter(a => a.isAccepted && (!a.txHash || a.txHash.length === 0))
       .map(a => {
-        const question = questions.find(q => q.id === a.questionId)
+        // Find question by matching questionId (handle both _id and id formats)
+        const answerQuestionId = a.questionId?._id || a.questionId || a.questionId?.toString()
+        const question = questions.find(q => {
+          const qId = q._id?.toString() || q.id
+          return qId === answerQuestionId || qId === a.questionId
+        })
         return {
-          id: a.id,
+          id: a._id || a.id,
           questionTitle: question?.title || 'Unknown Question',
           answerer: a.author,
           displayName: a.displayName,
           amount: 50, // Standard accepted answer reward
           status: 'pending' as const,
-          upvotes: a.upvotes,
+          upvotes: a.upvotes || 0,
         }
       })
-  }, [answers, questions])
+  }, [allAnswers, questions])
 
   // Get recent transactions (answers with tx hashes)
   const recentTransactions = useMemo(() => {
-    return answers
-      .filter(a => a.txHashes.length > 0)
-      .flatMap(a => a.txHashes.map((hash: string, idx: number) => ({
-        id: `${a.id}-${idx}`,
+    return allAnswers
+      .filter(a => a.txHash && a.txHash.length > 0)
+      .map(a => ({
+        id: a._id || a.id,
         action: a.isAccepted ? 'Answer Accepted' : 'Upvote Reward',
-        amount: a.vibeReward,
-        wallet: a.author.slice(0, 6) + '...' + a.author.slice(-4),
-        hash: hash.slice(0, 10) + '...' + hash.slice(-8),
-        fullHash: hash,
+        amount: a.vibeReward || 0,
+        wallet: a.author?.slice(0, 6) + '...' + a.author?.slice(-4) || 'Unknown',
+        hash: a.txHash?.slice(0, 10) + '...' + a.txHash?.slice(-8) || '',
+        fullHash: a.txHash,
         status: 'success' as const,
-        timestamp: a.createdAt,
-      })))
+        timestamp: a.createdAt || new Date(),
+      }))
       .slice(0, 10)
-  }, [answers])
+  }, [allAnswers])
 
   const toggleReward = (id: string) => {
     setSelectedRewards((prev) => (prev.includes(id) ? prev.filter((r) => r !== id) : [...prev, id]))
@@ -104,28 +140,44 @@ export default function AdminPage() {
   }
 
   const handleTriggerRewards = async () => {
+    if (!address) return
     setShowConfirmation(false)
     setTxStatus('pending')
     
     try {
+      const auth = await signRequest()
+      
       // Process each selected reward
       for (const rewardId of selectedRewards) {
         const reward = pendingRewards.find(r => r.id === rewardId)
         if (reward) {
-          const result = await rewardAcceptedAnswer(reward.answerer, rewardId)
-          if (result?.hash) {
-            // Update answer with tx hash
-            answerStore.addTxHash(rewardId, result.hash, 50)
-          }
+          // Use backend API to trigger reward (backend handles on-chain reward)
+          await api.rewards.triggerReward(
+            rewardId,
+            address,
+            auth?.signature,
+            auth?.timestamp
+          )
+          // Backend already updates the answer with txHash
         }
       }
       
       setTxStatus('success')
       setSelectedRewards([])
       
-      // Refresh data
-      const allAnswers = answerStore.getAll()
-      setAnswers(allAnswers)
+      // Refresh data from API
+      await refreshQuestions()
+      // Re-fetch answers
+      const answerPromises = questions.map(async (q) => {
+        try {
+          const result = await api.answers.list(q.id)
+          return result?.answers || []
+        } catch (error) {
+          return []
+        }
+      })
+      const answersArrays = await Promise.all(answerPromises)
+      setAllAnswers(answersArrays.flat())
       
       setTimeout(() => setTxStatus('idle'), 3000)
     } catch (error) {
@@ -162,6 +214,56 @@ export default function AdminPage() {
                 </button>
               )}
             </ConnectButton.Custom>
+          </div>
+        </div>
+        <Footer />
+      </main>
+    )
+  }
+
+  // Checking admin status - show loading
+  if (isCheckingAdmin) {
+    return (
+      <main className="min-h-screen bg-background">
+        <Header />
+        <div className="container mx-auto max-w-6xl px-4 py-16">
+          <div className="card-base text-center space-y-6 animate-slide-in-up">
+            <Loader2 className="h-12 w-12 animate-spin mx-auto text-primary" />
+            <div>
+              <h1 className="text-2xl font-bold mb-2">Checking Admin Access</h1>
+              <p className="text-muted-foreground">
+                Verifying your wallet permissions...
+              </p>
+            </div>
+          </div>
+        </div>
+        <Footer />
+      </main>
+    )
+  }
+
+  // Non-admin access denied
+  if (!isAdmin) {
+    return (
+      <main className="min-h-screen bg-background">
+        <Header />
+        <div className="container mx-auto max-w-6xl px-4 py-16">
+          <div className="card-base text-center space-y-6 animate-slide-in-up">
+            <div className="h-20 w-20 rounded-full bg-destructive/20 flex items-center justify-center border-2 border-destructive/50 mx-auto">
+              <AlertCircle className="h-10 w-10 text-destructive" />
+            </div>
+            <div>
+              <h1 className="text-2xl font-bold mb-2 text-destructive">Access Denied</h1>
+              <p className="text-muted-foreground mb-4">
+                You don't have admin privileges to access this panel.
+              </p>
+              <p className="text-sm text-muted-foreground">
+                Connected wallet: <span className="font-mono">{shortAddress}</span>
+              </p>
+              <p className="text-xs text-muted-foreground mt-2">
+                Only wallets with ADMIN_ROLE or REWARDER_ROLE can access this panel.
+              </p>
+            </div>
           </div>
         </div>
         <Footer />
@@ -301,7 +403,7 @@ export default function AdminPage() {
                 <button
                   onClick={() => setShowConfirmation(true)}
                   className="btn-primary gap-2 disabled:opacity-50 transition-all duration-200 hover:shadow-lg"
-                  disabled={selectedRewards.length === 0 || txStatus === 'pending'}
+                  disabled={!isAdmin || selectedRewards.length === 0 || txStatus === 'pending'}
                 >
                   {txStatus === 'pending' ? (
                     <>

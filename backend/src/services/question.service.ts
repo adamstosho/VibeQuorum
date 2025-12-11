@@ -3,6 +3,8 @@ import { Answer } from '../models/Answer';
 import { calculatePagination } from '../utils/helpers';
 import { NotFoundError } from '../utils/errors';
 import { PaginationQuery } from '../types';
+import { rewardService } from './reward.service';
+import { logger } from '../utils/logger';
 
 export class QuestionService {
   /**
@@ -131,7 +133,7 @@ export class QuestionService {
   }
 
   /**
-   * Accept answer
+   * Accept answer and automatically trigger reward
    */
   async acceptAnswer(questionId: string, answerId: string, author: string) {
     const question = await Question.findOne({ _id: questionId, author });
@@ -144,6 +146,11 @@ export class QuestionService {
       throw new NotFoundError('Answer');
     }
 
+    // Check if already accepted
+    if (answer.isAccepted) {
+      return { success: true, question, answer, alreadyAccepted: true };
+    }
+
     // Update question
     question.acceptedAnswerId = answer._id;
     question.status = 'answered';
@@ -153,7 +160,46 @@ export class QuestionService {
     answer.isAccepted = true;
     await answer.save();
 
-    return { success: true, question, answer };
+    // Automatically trigger on-chain reward for answer author (using admin wallet)
+    let rewardResult = null;
+    let rewardError = null;
+    
+    try {
+      logger.info(`🎁 Auto-triggering reward for accepted answer: ${answerId}`);
+      rewardResult = await rewardService.rewardAcceptedAnswer(answerId);
+      logger.info(`✅ Reward triggered successfully: ${rewardResult.txHash}`);
+    } catch (error: any) {
+      // Log error but don't fail the accept operation
+      // Reward can be triggered manually later via admin panel
+      rewardError = error.message;
+      logger.error(`⚠️ Failed to auto-trigger reward: ${error.message}`);
+      logger.error(`   Answer ${answerId} accepted but reward not triggered. Admin can trigger manually.`);
+    }
+
+    // Automatically trigger questioner bonus reward
+    let questionerRewardResult = null;
+    let questionerRewardError = null;
+    
+    try {
+      logger.info(`🎁 Auto-triggering questioner bonus for question: ${questionId}`);
+      questionerRewardResult = await rewardService.rewardQuestioner(questionId);
+      logger.info(`✅ Questioner bonus triggered successfully: ${questionerRewardResult.txHash}`);
+    } catch (error: any) {
+      // Log error but don't fail the accept operation
+      questionerRewardError = error.message;
+      logger.error(`⚠️ Failed to auto-trigger questioner bonus: ${error.message}`);
+      logger.error(`   Question ${questionId} answered but questioner bonus not triggered. Admin can trigger manually.`);
+    }
+
+    return {
+      success: true,
+      question,
+      answer,
+      reward: rewardResult,
+      rewardError: rewardError || undefined,
+      questionerReward: questionerRewardResult,
+      questionerRewardError: questionerRewardError || undefined,
+    };
   }
 }
 

@@ -2,6 +2,8 @@ import { Vote } from '../models/Vote';
 import { Question } from '../models/Question';
 import { Answer } from '../models/Answer';
 import { NotFoundError } from '../utils/errors';
+import { rewardService } from './reward.service';
+import { logger } from '../utils/logger';
 
 export class VoteService {
   /**
@@ -101,6 +103,28 @@ export class VoteService {
         upvotes,
         downvotes,
       });
+
+      // Check if answer reached upvote threshold (10 upvotes)
+      if (upvotes >= 10) {
+        try {
+          // Check if already rewarded for upvote threshold
+          const { RewardLog } = await import('../models/RewardLog');
+          const existingReward = await RewardLog.findOne({
+            answerId: targetId,
+            rewardType: 'upvote_threshold',
+            status: 'confirmed',
+          });
+
+          if (!existingReward) {
+            logger.info(`🎁 Answer ${targetId} reached upvote threshold (${upvotes} upvotes), triggering reward...`);
+            await rewardService.rewardUpvoteThreshold(targetId);
+            logger.info(`✅ Upvote threshold reward triggered successfully for answer ${targetId}`);
+          }
+        } catch (error: any) {
+          logger.error(`⚠️ Failed to trigger upvote threshold reward for answer ${targetId}: ${error.message}`);
+          // Don't throw - voting should still succeed even if reward fails
+        }
+      }
     }
   }
 

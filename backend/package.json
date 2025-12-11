@@ -1,5 +1,5 @@
 {
-  "name": "vibequorum-backend",
+  "name": "@vibequorum/backend",
   "version": "1.0.0",
   "description": "VibeQuorum Backend API - Web3 Q&A Platform with AI Integration",
   "main": "dist/server.js",

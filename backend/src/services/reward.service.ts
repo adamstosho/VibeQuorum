@@ -6,10 +6,22 @@ import { getAdminWallet, getProvider } from '../config/blockchain';
 import { NotFoundError } from '../utils/errors';
 import { logger } from '../utils/logger';
 
-// Simple ABI for VibeToken (mint function)
+// ABI for VibeToken (balance check)
 const VIBE_TOKEN_ABI = [
-  'function mint(address to, uint256 amount) external',
   'function balanceOf(address account) external view returns (uint256)',
+];
+
+// ABI for RewardManager (reward distribution)
+const REWARD_MANAGER_ABI = [
+  'function rewardAcceptedAnswer(address recipient, bytes32 answerId, uint256 questionId) external',
+  'function rewardUpvoteThreshold(address recipient, bytes32 answerId, uint256 questionId) external',
+  'function rewardQuestioner(address recipient, uint256 questionId) external',
+  'function generateAnswerIdFromString(string calldata answerIdString) external pure returns (bytes32)',
+  'function acceptedAnswerReward() external view returns (uint256)',
+  'function upvoteReward() external view returns (uint256)',
+  'function questionerBonus() external view returns (uint256)',
+  'function upvoteThreshold() external view returns (uint256)',
+  'function isAnswerRewarded(bytes32 answerId) external view returns (bool)',
 ];
 
 export class RewardService {
@@ -20,7 +32,7 @@ export class RewardService {
     txHash: string;
     amount: string;
   }> {
-    const answer = await Answer.findById(answerId);
+    const answer = await Answer.findById(answerId).populate('questionId');
     if (!answer) {
       throw new NotFoundError('Answer');
     }
@@ -40,43 +52,72 @@ export class RewardService {
       throw new Error('Answer already rewarded');
     }
 
-    const VIBE_TOKEN_ADDRESS = process.env.VIBE_TOKEN_ADDRESS;
-    if (!VIBE_TOKEN_ADDRESS) {
-      throw new Error('VIBE_TOKEN_ADDRESS not configured');
+    const REWARD_MANAGER_ADDRESS = process.env.REWARD_MANAGER_ADDRESS;
+    if (!REWARD_MANAGER_ADDRESS) {
+      throw new Error('REWARD_MANAGER_ADDRESS not configured');
     }
 
     try {
       const wallet = getAdminWallet();
-      const tokenContract = new ethers.Contract(
-        VIBE_TOKEN_ADDRESS,
-        VIBE_TOKEN_ABI,
+      const rewardManagerContract = new ethers.Contract(
+        REWARD_MANAGER_ADDRESS,
+        REWARD_MANAGER_ABI,
         wallet
       );
 
-      // Reward amount: 50 VIBE (50 * 10^18 wei)
-      const amount = ethers.parseEther('50');
+      // Generate answer ID hash (bytes32) from MongoDB answer ID string
+      const answerIdBytes = await rewardManagerContract.generateAnswerIdFromString(answerId);
+      
+      // Convert question ID (MongoDB ObjectId) to uint256
+      // Use the last 8 bytes of the ObjectId hex string as uint256
+      const questionIdHex = answer.questionId.toString();
+      const questionIdNum = BigInt('0x' + questionIdHex.slice(-16) || '0');
 
-      // Call mint function
-      const tx = await tokenContract.mint(answer.author, amount);
+      // Check if already rewarded on-chain
+      const isRewarded = await rewardManagerContract.isAnswerRewarded(answerIdBytes);
+      if (isRewarded) {
+        throw new Error('Answer already rewarded on-chain');
+      }
+
+      // Get reward amount from contract
+      const rewardAmount = await rewardManagerContract.acceptedAnswerReward();
+
+      // Call RewardManager.rewardAcceptedAnswer()
+      logger.info(`📤 Calling RewardManager.rewardAcceptedAnswer()`);
+      logger.info(`   Recipient: ${answer.author}`);
+      logger.info(`   Answer ID: ${answerId}`);
+      logger.info(`   Question ID: ${questionIdNum.toString()}`);
+      
+      const tx = await rewardManagerContract.rewardAcceptedAnswer(
+        answer.author,
+        answerIdBytes,
+        questionIdNum
+      );
+      
       logger.info(`✅ Reward transaction sent: ${tx.hash}`);
 
       // Wait for confirmation
       const receipt = await tx.wait();
       const txHash = receipt.hash;
 
+      // Get actual reward amount from contract (in case it changed)
+      const actualAmount = await rewardManagerContract.acceptedAnswerReward();
+
       // Save reward log
       await RewardLog.create({
         answerId,
         recipient: answer.author,
         rewardType: 'accepted_answer',
-        amount: amount.toString(),
+        amount: actualAmount.toString(),
         txHash,
         status: 'confirmed',
       });
 
-      // Update answer with tx hash
+      // Update answer with tx hash and reward amount
+      const rewardAmountInVibe = Number(ethers.formatEther(actualAmount));
       await Answer.findByIdAndUpdate(answerId, {
         $push: { txHashes: txHash },
+        $inc: { vibeReward: rewardAmountInVibe },
       });
 
       // Update user reputation
@@ -87,19 +128,21 @@ export class RewardService {
 
       return {
         txHash,
-        amount: amount.toString(),
+        amount: actualAmount.toString(),
       };
     } catch (error: any) {
       logger.error(`❌ Reward transaction failed: ${error.message}`);
+      logger.error(`   Error details:`, error);
 
       // Save failed reward log
       await RewardLog.create({
         answerId,
         recipient: answer.author,
         rewardType: 'accepted_answer',
-        amount: ethers.parseEther('50').toString(),
+        amount: '0', // Unknown amount on failure
         txHash: 'failed',
         status: 'failed',
+        error: error.message,
       });
 
       throw new Error(`Reward transaction failed: ${error.message}`);
@@ -128,6 +171,210 @@ export class RewardService {
     } catch (error: any) {
       logger.error(`❌ Failed to get token balance: ${error.message}`);
       return '0';
+    }
+  }
+
+  /**
+   * Reward answer that reached upvote threshold
+   */
+  async rewardUpvoteThreshold(answerId: string): Promise<{
+    txHash: string;
+    amount: string;
+  }> {
+    const answer = await Answer.findById(answerId).populate('questionId');
+    if (!answer) {
+      throw new NotFoundError('Answer');
+    }
+
+    // Check if already rewarded for upvote threshold
+    const existingReward = await RewardLog.findOne({
+      answerId,
+      rewardType: 'upvote_threshold',
+      status: 'confirmed',
+    });
+
+    if (existingReward) {
+      throw new Error('Answer already rewarded for upvote threshold');
+    }
+
+    const REWARD_MANAGER_ADDRESS = process.env.REWARD_MANAGER_ADDRESS;
+    if (!REWARD_MANAGER_ADDRESS) {
+      throw new Error('REWARD_MANAGER_ADDRESS not configured');
+    }
+
+    try {
+      const wallet = getAdminWallet();
+      const rewardManagerContract = new ethers.Contract(
+        REWARD_MANAGER_ADDRESS,
+        REWARD_MANAGER_ABI,
+        wallet
+      );
+
+      const answerIdBytes = await rewardManagerContract.generateAnswerIdFromString(answerId);
+      const questionIdHex = answer.questionId.toString();
+      const questionIdNum = BigInt('0x' + questionIdHex.slice(-16) || '0');
+
+      // Check if already rewarded on-chain (for upvote threshold)
+      // Note: We use a different check - the contract tracks by answerId, so we check if this specific reward type was given
+      const isRewarded = await rewardManagerContract.isAnswerRewarded(answerIdBytes);
+      if (isRewarded) {
+        // Check if this is specifically for upvote threshold
+        const existingAcceptedReward = await RewardLog.findOne({
+          answerId,
+          rewardType: 'accepted_answer',
+          status: 'confirmed',
+        });
+        // If there's an accepted_answer reward but not upvote_threshold, we can still reward
+        if (!existingAcceptedReward) {
+          throw new Error('Answer already rewarded on-chain');
+        }
+      }
+
+      const rewardAmount = await rewardManagerContract.upvoteReward();
+
+      logger.info(`📤 Calling RewardManager.rewardUpvoteThreshold()`);
+      logger.info(`   Recipient: ${answer.author}`);
+      logger.info(`   Answer ID: ${answerId}`);
+      logger.info(`   Question ID: ${questionIdNum.toString()}`);
+      
+      const tx = await rewardManagerContract.rewardUpvoteThreshold(
+        answer.author,
+        answerIdBytes,
+        questionIdNum
+      );
+      
+      logger.info(`✅ Upvote threshold reward transaction sent: ${tx.hash}`);
+
+      const receipt = await tx.wait();
+      const txHash = receipt.hash;
+      const actualAmount = await rewardManagerContract.upvoteReward();
+
+      await RewardLog.create({
+        answerId,
+        recipient: answer.author,
+        rewardType: 'upvote_threshold',
+        amount: actualAmount.toString(),
+        txHash,
+        status: 'confirmed',
+      });
+
+      // Update answer with tx hash and reward amount
+      const rewardAmountInVibe = Number(ethers.formatEther(actualAmount));
+      await Answer.findByIdAndUpdate(answerId, {
+        $push: { txHashes: txHash },
+        $inc: { vibeReward: rewardAmountInVibe },
+      });
+
+      await User.findOneAndUpdate(
+        { walletAddress: answer.author },
+        { $inc: { reputation: 25 } }
+      );
+
+      return {
+        txHash,
+        amount: actualAmount.toString(),
+      };
+    } catch (error: any) {
+      logger.error(`❌ Upvote threshold reward failed: ${error.message}`);
+      await RewardLog.create({
+        answerId,
+        recipient: answer.author,
+        rewardType: 'upvote_threshold',
+        amount: '0',
+        txHash: 'failed',
+        status: 'failed',
+        error: error.message,
+      });
+      throw new Error(`Upvote threshold reward failed: ${error.message}`);
+    }
+  }
+
+  /**
+   * Reward questioner when their answer is accepted
+   */
+  async rewardQuestioner(questionId: string): Promise<{
+    txHash: string;
+    amount: string;
+  }> {
+    const question = await (await import('../models/Question')).Question.findById(questionId);
+    if (!question) {
+      throw new NotFoundError('Question');
+    }
+
+    // Check if questioner already rewarded
+    const existingReward = await RewardLog.findOne({
+      questionId,
+      rewardType: 'questioner_bonus',
+      status: 'confirmed',
+    });
+
+    if (existingReward) {
+      throw new Error('Questioner already rewarded');
+    }
+
+    const REWARD_MANAGER_ADDRESS = process.env.REWARD_MANAGER_ADDRESS;
+    if (!REWARD_MANAGER_ADDRESS) {
+      throw new Error('REWARD_MANAGER_ADDRESS not configured');
+    }
+
+    try {
+      const wallet = getAdminWallet();
+      const rewardManagerContract = new ethers.Contract(
+        REWARD_MANAGER_ADDRESS,
+        REWARD_MANAGER_ABI,
+        wallet
+      );
+
+      const questionIdHex = question._id.toString();
+      const questionIdNum = BigInt('0x' + questionIdHex.slice(-16) || '0');
+
+      const rewardAmount = await rewardManagerContract.questionerBonus();
+
+      logger.info(`📤 Calling RewardManager.rewardQuestioner()`);
+      logger.info(`   Recipient: ${question.author}`);
+      logger.info(`   Question ID: ${questionIdNum.toString()}`);
+      
+      const tx = await rewardManagerContract.rewardQuestioner(
+        question.author,
+        questionIdNum
+      );
+      
+      logger.info(`✅ Questioner bonus transaction sent: ${tx.hash}`);
+
+      const receipt = await tx.wait();
+      const txHash = receipt.hash;
+      const actualAmount = await rewardManagerContract.questionerBonus();
+
+      await RewardLog.create({
+        questionId,
+        recipient: question.author,
+        rewardType: 'questioner_bonus',
+        amount: actualAmount.toString(),
+        txHash,
+        status: 'confirmed',
+      });
+
+      await User.findOneAndUpdate(
+        { walletAddress: question.author },
+        { $inc: { reputation: 10 } }
+      );
+
+      return {
+        txHash,
+        amount: actualAmount.toString(),
+      };
+    } catch (error: any) {
+      logger.error(`❌ Questioner bonus failed: ${error.message}`);
+      await RewardLog.create({
+        questionId,
+        recipient: question.author,
+        rewardType: 'questioner_bonus',
+        amount: '0',
+        txHash: 'failed',
+        status: 'failed',
+        error: error.message,
+      });
+      throw new Error(`Questioner bonus failed: ${error.message}`);
     }
   }
 

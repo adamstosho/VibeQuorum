@@ -1,13 +1,10 @@
 'use client'
 
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useCallback, useMemo } from 'react'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { 
-  questionStore, 
-  answerStore, 
-  voteStore,
   Question, 
   Answer,
-  Vote,
 } from '@/lib/stores/questions'
 import { api } from '@/lib/api'
 import { useApiAuth } from './use-api-auth'
@@ -19,61 +16,50 @@ export function useQuestions(options?: {
   status?: string
   sortBy?: string
 }) {
-  const [questions, setQuestions] = useState<Question[]>([])
-  const [loading, setLoading] = useState(true)
   const { address, signRequest } = useApiAuth()
-  const isMountedRef = useRef(true)
+  const queryClient = useQueryClient()
 
-  const refresh = useCallback(async () => {
-    if (!isMountedRef.current) return
-    
-    isMountedRef.current = true
-    setLoading(true)
-    try {
-      const results = await api.questions.list({
-        search: options?.searchQuery,
-        tag: options?.tags?.[0],
-        sort: options?.sortBy || 'newest',
-      })
-      if (isMountedRef.current) {
-        // Backend returns: { success: true, data: questions[], pagination: {...} }
-        // request() extracts data.data, so results is the questions array directly
-        // The backend controller returns: res.json({ success: true, data: result.questions, pagination: ... })
-        // So results is already the questions array
-        const questionsArray = Array.isArray(results) ? results : []
+  // Memoize query key to prevent unnecessary refetches
+  const queryKey = useMemo(() => [
+    'questions',
+    options?.searchQuery || '',
+    options?.tags?.join(',') || '',
+    options?.status || '',
+    options?.sortBy || 'newest',
+  ], [options?.searchQuery, options?.tags, options?.status, options?.sortBy])
+
+  const { data, isLoading, refetch, error } = useQuery({
+    queryKey,
+    queryFn: async () => {
+      try {
+        const results = await api.questions.list({
+          search: options?.searchQuery,
+          tag: options?.tags?.[0],
+          sort: options?.sortBy || 'newest',
+        })
         
         // Map MongoDB _id to id for frontend compatibility
-        const mappedQuestions = questionsArray.map((q: any) => ({
+        const questionsArray = Array.isArray(results) ? results : []
+        return questionsArray.map((q: any) => ({
           ...q,
-          id: q._id || q.id, // Use _id from MongoDB or fallback to id
-        }))
-        setQuestions(mappedQuestions)
+          id: q._id || q.id,
+        })) as Question[]
+      } catch (err: any) {
+        console.error('Failed to fetch questions:', err)
+        // Return empty array on error instead of throwing
+        // This prevents the entire component from breaking
+        return [] as Question[]
       }
-    } catch (error) {
-      if (isMountedRef.current) {
-        console.error('Failed to fetch questions:', error)
-        setQuestions([])
-      }
-    } finally {
-      if (isMountedRef.current) {
-        setLoading(false)
-      }
-    }
-  }, [options?.searchQuery, options?.tags, options?.status, options?.sortBy])
+    },
+    staleTime: 30 * 1000, // 30 seconds
+    gcTime: 5 * 60 * 1000, // 5 minutes (formerly cacheTime)
+    retry: 1, // Only retry once
+    retryDelay: 1000, // Wait 1 second before retry
+  })
 
-  useEffect(() => {
-    if (typeof window === 'undefined') return
-    
-    isMountedRef.current = true
-    const timeoutId = setTimeout(() => {
-      refresh()
-    }, 0)
-    
-    return () => {
-      clearTimeout(timeoutId)
-      isMountedRef.current = false
-    }
-  }, [refresh])
+  const refresh = useCallback(() => {
+    refetch()
+  }, [refetch])
 
   const createQuestion = useCallback(async (data: {
     title: string
@@ -94,149 +80,126 @@ export function useQuestions(options?: {
     return result
   }, [refresh, address, signRequest])
 
+  // Log error in development
+  if (error && typeof window !== 'undefined' && process.env.NODE_ENV === 'development') {
+    console.warn('Questions fetch error:', error)
+  }
+
   return {
-    questions,
-    loading,
+    questions: data || [],
+    loading: isLoading,
     refresh,
     createQuestion,
-    totalCount: questions.length,
+    totalCount: data?.length || 0,
+    error: error ? (error as Error).message : undefined,
   }
 }
 
 // Hook for a single question
 export function useQuestion(questionId: string | null) {
-  const [question, setQuestion] = useState<Question | null>(null)
-  const [loading, setLoading] = useState(true)
-  const isMountedRef = useRef(true)
-
-  const refresh = useCallback(async () => {
-    if (!questionId) {
-      setQuestion(null)
-      setLoading(false)
-      return
-    }
-    
-    if (!isMountedRef.current) return
-    
-    isMountedRef.current = true
-    setLoading(true)
-    try {
-      const result = await api.questions.get(questionId)
-      if (isMountedRef.current) {
+  const { address, signRequest } = useApiAuth()
+  const { data, isLoading, refetch, error } = useQuery({
+    queryKey: ['question', questionId],
+    queryFn: async () => {
+      if (!questionId) return null
+      try {
+        const result = await api.questions.get(questionId)
         const question = result?.question
         if (question) {
-          // Map MongoDB _id to id for frontend compatibility
-          setQuestion({
+          return {
             ...question,
             id: question._id || question.id,
-          })
-        } else {
-          setQuestion(null)
+          } as Question
         }
+        return null
+      } catch (err: any) {
+        console.error('Failed to fetch question:', err)
+        return null
       }
+    },
+    enabled: !!questionId,
+    staleTime: 60 * 1000, // 1 minute
+    gcTime: 10 * 60 * 1000, // 10 minutes
+    retry: 1,
+    retryDelay: 1000,
+  })
+
+  const refresh = useCallback(() => {
+    refetch()
+  }, [refetch])
+
+  const updateQuestion = useCallback(async (updates: Partial<Question>) => {
+    if (!questionId || !address) return null
+    try {
+      const auth = await signRequest()
+      await api.questions.update(
+        questionId,
+        updates as { title?: string; description?: string; tags?: string[] },
+        address,
+        auth?.signature,
+        auth?.timestamp
+      )
+      await refresh()
+      return data
     } catch (error) {
-      if (isMountedRef.current) {
-        console.error('Failed to fetch question:', error)
-        setQuestion(null)
-      }
-    } finally {
-      if (isMountedRef.current) {
-        setLoading(false)
-      }
+      console.error('Failed to update question:', error)
+      return null
     }
-  }, [questionId])
+  }, [questionId, address, signRequest, refresh, data])
 
-  useEffect(() => {
-    if (typeof window === 'undefined') return
-    
-    isMountedRef.current = true
-    const timeoutId = setTimeout(() => {
-      refresh()
-    }, 0)
-    
-    return () => {
-      clearTimeout(timeoutId)
-      isMountedRef.current = false
+  const deleteQuestion = useCallback(async () => {
+    if (!questionId || !address) return false
+    try {
+      const auth = await signRequest()
+      await api.questions.delete(questionId, address, auth?.signature, auth?.timestamp)
+      await refresh()
+      return true
+    } catch (error) {
+      console.error('Failed to delete question:', error)
+      return false
     }
-  }, [refresh])
+  }, [questionId, address, signRequest, refresh])
 
-  const updateQuestion = useCallback((updates: Partial<Question>) => {
-    if (!questionId) return null
-    const updated = questionStore.update(questionId, updates)
-    if (updated) setQuestion(updated)
-    return updated
-  }, [questionId])
-
-  const deleteQuestion = useCallback(() => {
-    if (!questionId) return false
-    const success = questionStore.delete(questionId)
-    if (success) setQuestion(null)
-    return success
-  }, [questionId])
+  if (error && typeof window !== 'undefined' && process.env.NODE_ENV === 'development') {
+    console.warn('Question fetch error:', error)
+  }
 
   return {
-    question,
-    loading,
+    question: data || null,
+    loading: isLoading,
     refresh,
     updateQuestion,
     deleteQuestion,
+    error: error ? (error as Error).message : undefined,
   }
 }
 
 // Hook for answers
 export function useAnswers(questionId: string | null) {
-  const [answers, setAnswers] = useState<Answer[]>([])
-  const [loading, setLoading] = useState(true)
   const { address, signRequest } = useApiAuth()
-  const isMountedRef = useRef(true)
+  const queryClient = useQueryClient()
 
-  const refresh = useCallback(async () => {
-    if (!questionId) {
-      setAnswers([])
-      setLoading(false)
-      return
-    }
-    
-    if (!isMountedRef.current) return
-    
-    isMountedRef.current = true
-    setLoading(true)
-    try {
+  const { data, isLoading, refetch } = useQuery({
+    queryKey: ['answers', questionId],
+    queryFn: async () => {
+      if (!questionId) return []
       const results = await api.answers.list(questionId)
-      if (isMountedRef.current) {
-        // Map MongoDB _id to id for frontend compatibility
-        const mappedAnswers = (results?.answers || []).map((a: any) => ({
-          ...a,
-          id: a._id || a.id,
-          questionId: a.questionId || questionId,
-        }))
-        setAnswers(mappedAnswers)
-      }
-    } catch (error) {
-      if (isMountedRef.current) {
-        console.error('Failed to fetch answers:', error)
-        setAnswers([])
-      }
-    } finally {
-      if (isMountedRef.current) {
-        setLoading(false)
-      }
-    }
-  }, [questionId])
+      return (results?.answers || []).map((a: any) => ({
+        ...a,
+        id: a._id || a.id,
+        questionId: a.questionId || questionId,
+        vibeReward: a.vibeReward || 0, // Ensure vibeReward is always a number
+        txHashes: a.txHashes || a.txHash ? [a.txHash] : [], // Handle both array and single hash
+      })) as Answer[]
+    },
+    enabled: !!questionId,
+    staleTime: 30 * 1000, // 30 seconds
+    gcTime: 5 * 60 * 1000, // 5 minutes
+  })
 
-  useEffect(() => {
-    if (typeof window === 'undefined') return
-    
-    isMountedRef.current = true
-    const timeoutId = setTimeout(() => {
-      refresh()
-    }, 0)
-    
-    return () => {
-      clearTimeout(timeoutId)
-      isMountedRef.current = false
-    }
-  }, [refresh])
+  const refresh = useCallback(() => {
+    refetch()
+  }, [refetch])
 
   const createAnswer = useCallback(async (data: {
     content: string
@@ -257,60 +220,113 @@ export function useAnswers(questionId: string | null) {
     return result
   }, [questionId, refresh, address, signRequest])
 
+  // Accept answer - now handled by backend API, this just refreshes data
   const acceptAnswer = useCallback((answerId: string, txHash?: string, vibeReward?: number) => {
-    const answer = answerStore.accept(answerId, txHash, vibeReward)
-    refresh()
-    return answer
-  }, [refresh])
+    // Backend handles accepting answer and triggering reward
+    // Refresh the data to get updated answer status and rewards
+    refetch()
+    // Return the answer from current data if available
+    const currentAnswers = data || []
+    return currentAnswers.find(a => a.id === answerId) || null
+  }, [refetch, data])
 
+  // Add reward tx hash to answer - backend already handles this, just refresh
   const addRewardToAnswer = useCallback((answerId: string, txHash: string, vibeReward: number) => {
-    const answer = answerStore.addTxHash(answerId, txHash, vibeReward)
-    refresh()
-    return answer
-  }, [refresh])
+    // Backend already saves txHash and vibeReward when reward is triggered
+    // Refresh to get updated data from backend
+    refetch()
+    const currentAnswers = data || []
+    return currentAnswers.find(a => a.id === answerId) || null
+  }, [refetch, data])
 
   return {
-    answers,
-    loading,
+    answers: data || [],
+    loading: isLoading,
     refresh,
     createAnswer,
     acceptAnswer,
     addRewardToAnswer,
-    totalCount: answers.length,
+    totalCount: (data || []).length,
   }
 }
 
 // Hook for voting
 export function useVoting(userAddress: string | undefined) {
-  const vote = useCallback((
+  const { signRequest } = useApiAuth()
+  const queryClient = useQueryClient()
+
+  const vote = useCallback(async (
     targetType: 'question' | 'answer',
     targetId: string,
     value: 1 | -1
   ) => {
     if (!userAddress) return null
-    return voteStore.vote({
-      voter: userAddress,
-      targetType,
-      targetId,
-      value,
-    })
-  }, [userAddress])
+    try {
+      const auth = await signRequest()
+      const result = await api.votes.vote(
+        targetType,
+        targetId,
+        value,
+        userAddress,
+        auth?.signature,
+        auth?.timestamp
+      )
+      // Invalidate relevant queries to refresh vote counts
+      if (targetType === 'question') {
+        queryClient.invalidateQueries({ queryKey: ['question', targetId] })
+        queryClient.invalidateQueries({ queryKey: ['questions'] })
+      } else {
+        // Find which question this answer belongs to
+        queryClient.invalidateQueries({ queryKey: ['answers'] })
+      }
+      return result
+    } catch (error) {
+      console.error('Failed to vote:', error)
+      return null
+    }
+  }, [userAddress, signRequest, queryClient])
 
-  const getUserVote = useCallback((
+  const getUserVote = useCallback(async (
     targetType: 'question' | 'answer',
     targetId: string
-  ): Vote | null => {
+  ): Promise<number | null> => {
     if (!userAddress) return null
-    return voteStore.getUserVote(userAddress, targetType, targetId)
+    try {
+      const result = await api.votes.getUserVote(targetType, targetId, userAddress)
+      return result?.vote || null
+    } catch (error) {
+      console.error('Failed to get user vote:', error)
+      return null
+    }
   }, [userAddress])
 
-  const removeVote = useCallback((
+  const removeVote = useCallback(async (
     targetType: 'question' | 'answer',
     targetId: string
   ) => {
     if (!userAddress) return false
-    return voteStore.removeVote(userAddress, targetType, targetId)
-  }, [userAddress])
+    try {
+      const auth = await signRequest()
+      await api.votes.remove(
+        targetType,
+        targetId,
+        userAddress,
+        auth?.signature,
+        auth?.timestamp
+      )
+      // Invalidate relevant queries
+      if (targetType === 'question') {
+        queryClient.invalidateQueries({ queryKey: ['question', targetId] })
+        queryClient.invalidateQueries({ queryKey: ['questions'] })
+      } else {
+        queryClient.invalidateQueries({ queryKey: ['answers'] })
+      }
+      return true
+    } catch (error) {
+      console.error('Failed to remove vote:', error)
+      return false
+    }
+  }, [userAddress, signRequest, queryClient])
 
   return {
     vote,
@@ -321,83 +337,51 @@ export function useVoting(userAddress: string | undefined) {
 
 // Hook for user's questions and answers
 export function useUserContent(userAddress: string | undefined) {
-  const [questions, setQuestions] = useState<Question[]>([])
-  const [answers, setAnswers] = useState<Answer[]>([])
-  const [loading, setLoading] = useState(true)
-  const isMountedRef = useRef(true)
-
-  const refresh = useCallback(async () => {
-    if (!userAddress) {
-      setQuestions([])
-      setAnswers([])
-      setLoading(false)
-      return
-    }
-    
-    if (!isMountedRef.current) return
-    
-    isMountedRef.current = true
-    setLoading(true)
-    try {
-      // Fetch user's questions and answers from API
+  const { data: questionsData, isLoading: questionsLoading } = useQuery({
+    queryKey: ['user-questions', userAddress],
+    queryFn: async () => {
+      if (!userAddress) return []
+      // Fetch all questions and filter client-side (backend should add endpoint for this)
       const allQuestionsResult = await api.questions.list()
-      if (isMountedRef.current) {
-        // Backend returns: { success: true, data: questions[], pagination: {...} }
-        // request() extracts data.data, so allQuestionsResult is the questions array directly
-        const allQuestions = Array.isArray(allQuestionsResult) ? allQuestionsResult : []
-        
-        const userQuestions = allQuestions.filter(
-          (q: any) => q.author?.toLowerCase() === userAddress.toLowerCase()
-        )
-        setQuestions(userQuestions)
-        
-        // For answers, we'd need an API endpoint for user's answers
-        // For now, return empty array
-        setAnswers([])
-      }
-    } catch (error) {
-      if (isMountedRef.current) {
-        console.error('Failed to fetch user content:', error)
-        setQuestions([])
-        setAnswers([])
-      }
-    } finally {
-      if (isMountedRef.current) {
-        setLoading(false)
-      }
-    }
-  }, [userAddress])
+      const allQuestions = Array.isArray(allQuestionsResult) ? allQuestionsResult : []
+      return allQuestions
+        .filter((q: any) => q.author?.toLowerCase() === userAddress.toLowerCase())
+        .map((q: any) => ({
+          ...q,
+          id: q._id || q.id,
+        })) as Question[]
+    },
+    enabled: !!userAddress,
+    staleTime: 60 * 1000, // 1 minute
+    gcTime: 5 * 60 * 1000, // 5 minutes
+  })
 
-  useEffect(() => {
-    if (typeof window === 'undefined') return
-    
-    isMountedRef.current = true
-    const timeoutId = setTimeout(() => {
-      refresh()
-    }, 0)
-    
-    return () => {
-      clearTimeout(timeoutId)
-      isMountedRef.current = false
-    }
-  }, [refresh])
+  // For answers, we'd need an API endpoint for user's answers
+  // For now, return empty array
+  const answers: Answer[] = []
 
   // Calculate total rewards earned
-  const totalRewardsEarned = answers.reduce((sum, a) => sum + a.vibeReward, 0)
+  const totalRewardsEarned = useMemo(() => 
+    answers.reduce((sum, a) => sum + a.vibeReward, 0),
+    [answers]
+  )
   
   // Calculate reputation (simplified)
-  const reputation = answers.reduce((sum, a) => {
-    let points = a.upvotes * 10 - a.downvotes * 5
-    if (a.isAccepted) points += 50
-    return sum + points
-  }, 0)
+  const reputation = useMemo(() => 
+    answers.reduce((sum, a) => {
+      let points = a.upvotes * 10 - a.downvotes * 5
+      if (a.isAccepted) points += 50
+      return sum + points
+    }, 0),
+    [answers]
+  )
 
   return {
-    questions,
+    questions: questionsData || [],
     answers,
-    loading,
-    refresh,
-    questionsCount: questions.length,
+    loading: questionsLoading,
+    refresh: () => {}, // Not needed with React Query
+    questionsCount: questionsData?.length || 0,
     answersCount: answers.length,
     acceptedAnswersCount: answers.filter(a => a.isAccepted).length,
     totalRewardsEarned,
