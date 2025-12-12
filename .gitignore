@@ -1,6 +1,8 @@
 # Dependencies
 node_modules/
 .pnpm-store/
+# Root node_modules (monorepo)
+/node_modules/
 
 # Build outputs
 .next/

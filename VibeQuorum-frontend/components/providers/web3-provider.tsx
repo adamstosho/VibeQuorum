@@ -19,12 +19,17 @@ function getQueryClient() {
     queryClientInstance = new QueryClient({
       defaultOptions: {
         queries: {
-          staleTime: 60 * 1000, // 1 minute
-          refetchOnWindowFocus: false,
-          refetchOnMount: false,
-          refetchOnReconnect: false,
-          retry: 1,
-          retryDelay: 1000,
+          staleTime: 30 * 1000, // 30 seconds - data stays fresh for 30s
+          gcTime: 5 * 60 * 1000, // 5 minutes - cache persists for 5min
+          refetchOnWindowFocus: false, // Don't refetch on window focus
+          refetchOnMount: 'always', // Always refetch on mount for fresh data
+          refetchOnReconnect: true, // Refetch when reconnecting
+          retry: 1, // Only retry once on failure
+          retryDelay: 1000, // Wait 1s before retry
+          structuralSharing: true, // Enable structural sharing for better performance
+        },
+        mutations: {
+          retry: 0, // Don't retry mutations
         },
       },
     })

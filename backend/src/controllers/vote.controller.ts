@@ -73,5 +73,32 @@ export const voteController = {
       message: 'Vote removed',
     });
   },
+
+  /**
+   * Get user's vote on target
+   */
+  getUserVote: async (req: AuthRequest, res: Response<ApiResponse>): Promise<void> => {
+    const voter = req.walletAddress!;
+    const { id, type } = req.params;
+
+    if (!['question', 'answer'].includes(type)) {
+      res.status(400).json({
+        success: false,
+        error: 'Invalid type. Must be "question" or "answer"',
+      });
+      return;
+    }
+
+    const voteValue = await voteService.getUserVote(
+      voter,
+      type as 'question' | 'answer',
+      id
+    );
+
+    res.json({
+      success: true,
+      data: { vote: voteValue }, // null if no vote, 1 for upvote, -1 for downvote
+    });
+  },
 };
 

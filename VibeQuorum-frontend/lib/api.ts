@@ -1,5 +1,10 @@
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000'
 
+// Log API URL in development for debugging
+if (typeof window !== 'undefined' && process.env.NODE_ENV === 'development') {
+  console.log('🔗 API URL:', API_URL)
+}
+
 interface ApiResponse<T = any> {
   success: boolean
   data?: T
@@ -21,6 +26,12 @@ async function request<T>(
 ): Promise<T> {
   const { method = 'GET', body, walletAddress, signature, timestamp } = options
 
+  // Ensure we have a valid API URL
+  const apiUrl = API_URL || 'http://localhost:4000'
+  if (!apiUrl) {
+    throw new Error('API URL is not configured. Please set NEXT_PUBLIC_API_URL in .env.local')
+  }
+
   const headers: HeadersInit = {
     'Content-Type': 'application/json',
   }
@@ -39,7 +50,7 @@ async function request<T>(
 
   // Longer timeout for AI requests (120 seconds)
   const isAIRequest = endpoint.includes('/ai-draft')
-  const timeout = isAIRequest ? 120000 : 30000 // 120s for AI, 30s for others
+  const timeout = isAIRequest ? 120000 : 10000 // 120s for AI, 10s for others (reduced from 30s)
 
   const config: RequestInit = {
     method,
@@ -51,8 +62,20 @@ async function request<T>(
     config.body = JSON.stringify(body)
   }
 
+  const url = `${apiUrl}${endpoint}`
+
   try {
-    const response = await fetch(`${API_URL}${endpoint}`, config)
+    // Log request in development
+    if (typeof window !== 'undefined' && process.env.NODE_ENV === 'development') {
+      console.log(`📤 API Request: ${method} ${url}`)
+    }
+    
+    const response = await fetch(url, config)
+    
+    // Log response in development
+    if (typeof window !== 'undefined' && process.env.NODE_ENV === 'development') {
+      console.log(`📥 API Response: ${method} ${url} - Status: ${response.status}`)
+    }
     
     if (!response.ok) {
       let errorMessage = `Request failed with status ${response.status}`
@@ -74,12 +97,42 @@ async function request<T>(
 
     return data.data as T
   } catch (error: any) {
+    // Handle network errors with more specific messages
     if (error.name === 'AbortError' || error.name === 'TimeoutError') {
-      throw new Error('Request timeout - server is not responding')
+      const errorMsg = `⏱️ Request timeout - The server at ${API_URL} is not responding. Please ensure the backend server is running on port 4000.`
+      console.error(errorMsg, { endpoint, url, timeout })
+      throw new Error(errorMsg)
     }
-    if (error.name === 'TypeError' && error.message.includes('fetch')) {
-      throw new Error('Network error - unable to connect to server')
+    
+    // Handle fetch failures (network errors, CORS, etc.)
+    if (error.name === 'TypeError' && (error.message.includes('fetch') || error.message.includes('Failed to fetch'))) {
+      const errorMsg = `🌐 Network error - Unable to connect to ${apiUrl}
+
+Troubleshooting steps:
+1. ✅ Check if backend server is running: curl http://localhost:4000/health
+2. ✅ Verify NEXT_PUBLIC_API_URL in .env.local is set to: http://localhost:4000
+3. ✅ Restart frontend dev server after adding NEXT_PUBLIC_API_URL
+4. ✅ Check CORS configuration in backend
+5. ✅ Ensure both servers are running (backend:4000, frontend:3000)
+6. ✅ Check browser console Network tab for detailed error
+
+Current API URL: ${apiUrl}
+Request URL: ${url}
+Environment: ${process.env.NODE_ENV}`
+      console.error(errorMsg, { 
+        endpoint, 
+        url, 
+        apiUrl: apiUrl,
+        apiUrlEnv: process.env.NEXT_PUBLIC_API_URL,
+        error: error.message,
+        errorName: error.name,
+        stack: error.stack 
+      })
+      throw new Error(`Cannot connect to backend server at ${apiUrl}. Make sure the server is running and NEXT_PUBLIC_API_URL is set correctly.`)
     }
+    
+    // Re-throw other errors as-is
+    console.error('❌ API request error:', { endpoint, url, error: error.message, error })
     throw error
   }
 }
@@ -128,6 +181,8 @@ export const api = {
       request(`/api/${type === 'question' ? 'questions' : 'answers'}/${id}/vote`, { method: 'POST', body: { value }, walletAddress, signature, timestamp }),
     remove: (type: 'question' | 'answer', id: string, walletAddress: string, signature?: string, timestamp?: string) =>
       request(`/api/votes/${type}/${id}`, { method: 'DELETE', walletAddress, signature, timestamp }),
+    getUserVote: (type: 'question' | 'answer', id: string, walletAddress?: string) =>
+      request<{ vote: number | null }>(`/api/votes/${type}/${id}`, { walletAddress }),
   },
 
   // AI
@@ -150,6 +205,8 @@ export const api = {
   rewards: {
     getBalance: (walletAddress?: string) => request('/api/rewards/balance', { walletAddress }),
     getHistory: (walletAddress?: string) => request('/api/rewards/history', { walletAddress }),
+    triggerReward: (answerId: string, walletAddress: string, signature?: string, timestamp?: string) =>
+      request('/api/rewards/trigger', { method: 'POST', body: { answerId }, walletAddress, signature, timestamp }),
   },
 }
 

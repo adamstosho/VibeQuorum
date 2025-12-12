@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { voteController } from '../controllers/vote.controller';
 import { authMiddleware, requireSignature } from '../middleware/auth.middleware';
-import { writeLimiter } from '../middleware/rateLimit.middleware';
+import { writeLimiter, generalLimiter } from '../middleware/rateLimit.middleware';
 import { validate, validateParams } from '../middleware/validate.middleware';
 import { z } from 'zod';
 
@@ -63,6 +63,24 @@ router.delete(
     })
   ),
   voteController.removeVote
+);
+
+/**
+ * @route   GET /api/votes/:type/:id
+ * @desc    Get user's vote on target
+ * @access  Private
+ */
+router.get(
+  '/:type/:id',
+  authMiddleware,
+  generalLimiter,
+  validateParams(
+    z.object({
+      type: z.enum(['question', 'answer']),
+      id: z.string().regex(/^[0-9a-fA-F]{24}$/),
+    })
+  ),
+  voteController.getUserVote
 );
 
 export default router;

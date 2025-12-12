@@ -51,43 +51,50 @@ export const createApp = (): Express => {
   // Allow all origins in development if explicitly set
   const allowAllOrigins = process.env.ALLOW_ALL_ORIGINS === 'true';
 
-  app.use(
-    cors({
-      origin: (origin, callback) => {
-        // Allow requests with no origin (like mobile apps, Postman, etc.)
-        if (!origin) {
+  // CORS configuration with TypeScript typing
+  const corsOptions = {
+    origin: (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
+      // Allow requests with no origin (like mobile apps, Postman, etc.)
+      if (!origin) return callback(null, true);
+
+      // Allow all origins in development if explicitly set
+      if (allowAllOrigins) {
+        return callback(null, true);
+      }
+
+      // Check if origin is in allowed list
+      if (allowedOrigins.includes(origin)) {
+        return callback(null, true);
+      }
+
+      // Check if origin is localhost (any port) - works in both dev and prod
+      if (origin.startsWith('http://localhost:') || origin.startsWith('http://127.0.0.1:')) {
+        return callback(null, true);
+      }
+
+      // In development, also allow any localhost origin (more permissive)
+      if (process.env.NODE_ENV === 'development') {
+        if (origin.includes('localhost') || origin.includes('127.0.0.1')) {
           return callback(null, true);
         }
+      }
 
-        // Allow all origins in development
-        if (allowAllOrigins) {
-          return callback(null, true);
-        }
-
-        // Check if origin is in allowed list
-        if (allowedOrigins.includes(origin)) {
-          return callback(null, true);
-        }
-
-        // Check if origin is localhost (any port)
-        if (origin.startsWith('http://localhost:') || origin.startsWith('http://127.0.0.1:')) {
-          return callback(null, true);
-        }
-
-        // Reject origin
-        callback(new Error(`CORS: Origin ${origin} is not allowed`));
-      },
-      credentials: true,
-      methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-      allowedHeaders: [
-        'Content-Type',
-        'Authorization',
-        'x-wallet-address',
-        'x-signature',
-        'x-timestamp',
-      ],
-    })
-  );
+      // Reject origin
+      callback(new Error(`CORS: Origin ${origin} is not allowed`));
+    },
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+    allowedHeaders: [
+      'Content-Type',
+      'Authorization',
+      'x-wallet-address',
+      'x-signature',
+      'x-timestamp',
+    ],
+    exposedHeaders: ['x-total-count'],
+  };
+  
+  app.use(cors(corsOptions));
 
   // Body parsing middleware
   app.use(express.json({ limit: '10mb' }));

@@ -1,0 +1,49 @@
+{
+  "name": "vibequorum-monorepo",
+  "version": "1.0.0",
+  "private": true,
+  "description": "VibeQuorum - Web3 Q&A Platform Monorepo",
+  "workspaces": [
+    "backend",
+    "VibeQuorum-frontend",
+    "contracts"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspaces --if-present",
+    "dev:backend": "npm run dev --workspace=backend",
+    "dev:frontend": "npm run dev --workspace=VibeQuorum-frontend",
+    "dev:contracts": "npm run node --workspace=contracts",
+    "build": "npm run build --workspaces --if-present",
+    "build:backend": "npm run build --workspace=backend",
+    "build:frontend": "npm run build --workspace=VibeQuorum-frontend",
+    "build:contracts": "npm run compile --workspace=contracts",
+    "test": "npm run test --workspaces --if-present",
+    "test:backend": "npm run test --workspace=backend",
+    "test:contracts": "npm run test --workspace=contracts",
+    "lint": "npm run lint --workspaces --if-present",
+    "lint:fix": "npm run lint:fix --workspace=backend",
+    "clean": "npm run clean --workspaces --if-present && rm -rf node_modules",
+    "install:all": "npm install",
+    "start": "npm run start --workspaces --if-present"
+  },
+  "keywords": [
+    "monorepo",
+    "web3",
+    "q&a",
+    "blockchain",
+    "ai",
+    "nextjs",
+    "express",
+    "hardhat"
+  ],
+  "author": "VibeQuorum Team",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18.0.0",
+    "npm": ">=9.0.0"
+  },
+  "devDependencies": {
+    "prettier": "^3.0.0",
+    "prettier-plugin-solidity": "^1.3.0"
+  }
+}

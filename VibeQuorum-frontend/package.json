@@ -1,5 +1,5 @@
 {
-  "name": "VibeQuorum",
+  "name": "@vibequorum/frontend",
   "version": "0.1.0",
   "private": true,
   "scripts": {

@@ -1,7 +1,8 @@
 import mongoose, { Schema, Document, Types } from 'mongoose';
 
 export interface IRewardLog extends Document {
-  answerId: Types.ObjectId;
+  answerId?: Types.ObjectId;
+  questionId?: Types.ObjectId;
   recipient: string; // wallet address
   rewardType: 'accepted_answer' | 'upvote_threshold' | 'questioner_bonus' | 'special';
   amount: string; // in wei
@@ -16,7 +17,17 @@ const RewardLogSchema = new Schema<IRewardLog>(
     answerId: {
       type: Schema.Types.ObjectId,
       ref: 'Answer',
-      required: true,
+      required: function(this: IRewardLog) {
+        return this.rewardType !== 'questioner_bonus';
+      },
+      index: true,
+    },
+    questionId: {
+      type: Schema.Types.ObjectId,
+      ref: 'Question',
+      required: function(this: IRewardLog) {
+        return this.rewardType === 'questioner_bonus';
+      },
       index: true,
     },
     recipient: {

@@ -1,11 +1,12 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useMemo } from "react"
 import Link from "next/link"
 import { Menu, X, Wallet, ChevronDown, Zap, ExternalLink, Copy, Check } from "lucide-react"
 import Logo from "./logo"
 import { useWallet } from "@/hooks/use-wallet"
 import { ConnectButton } from "@rainbow-me/rainbowkit"
+import { useContractRoles } from "@/hooks/use-contracts"
 
 export default function Header() {
   const [mounted, setMounted] = useState(false)
@@ -26,10 +27,29 @@ export default function Header() {
     explorerUrl,
   } = useWallet()
 
+  // Check admin status
+  const { isAdmin } = useContractRoles(address)
+
   // Prevent hydration mismatch
   useEffect(() => {
     setMounted(true)
   }, [])
+
+  // Navigation items - conditionally include Admin
+  const navItems = useMemo(() => {
+    const items = [
+      { label: "Questions", href: "/questions" },
+      { label: "Ask", href: "/ask" },
+      { label: "Profile", href: "/profile" },
+    ]
+    
+    // Only add Admin link if user is an admin
+    if (isAdmin) {
+      items.push({ label: "Admin", href: "/admin" })
+    }
+    
+    return items
+  }, [isAdmin])
 
   const copyAddress = () => {
     if (address) {
@@ -55,12 +75,7 @@ export default function Header() {
 
         {/* Desktop Nav */}
         <nav className="hidden md:flex items-center gap-8">
-          {[
-            { label: "Questions", href: "/questions" },
-            { label: "Ask", href: "/ask" },
-            { label: "Profile", href: "/profile" },
-            { label: "Admin", href: "/admin" },
-          ].map((item) => (
+          {navItems.map((item) => (
             <Link
               key={item.label}
               href={item.href}
@@ -214,12 +229,7 @@ export default function Header() {
               <span className="text-sm font-bold text-accent">{vibeBalanceFormatted} VIBE</span>
             </div>
           )}
-          {[
-            { label: "Questions", href: "/questions" },
-            { label: "Ask", href: "/ask" },
-            { label: "Profile", href: "/profile" },
-            { label: "Admin", href: "/admin" },
-          ].map((item) => (
+          {navItems.map((item) => (
             <Link
               key={item.label}
               href={item.href}

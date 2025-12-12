@@ -1,6 +1,6 @@
-import { http, createConfig } from 'wagmi'
+import { http } from 'wagmi'
 import { baseSepolia, sepolia, bscTestnet } from 'wagmi/chains'
-import { injected, metaMask, walletConnect, coinbaseWallet, safe } from 'wagmi/connectors'
+import { getDefaultConfig } from '@rainbow-me/rainbowkit'
 
 // Contract addresses - DEPLOYED on Base Sepolia Dec 5, 2025
 export const CONTRACT_ADDRESSES = {
@@ -37,44 +37,16 @@ export const getExplorerAddressUrl = (chainId: number, address: string): string 
   return `${base}/address/${address}`
 }
 
-// Wagmi configuration
-// RainbowKit v2 automatically detects and shows all available wallets
-// WalletConnect should show ALL wallets via QR code, even if not installed
-export const wagmiConfig = createConfig({
+// Wagmi configuration using RainbowKit v2's getDefaultConfig
+// This is the recommended approach - getDefaultConfig automatically includes MetaMask
+// and properly handles EIP-6963 wallet detection
+export const wagmiConfig = getDefaultConfig({
+  appName: 'VibeQuorum',
+  projectId: process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID || 'a841e40e8e4a659aad0d5fb9f98bf593',
   chains: SUPPORTED_CHAINS,
-  connectors: [
-    // WalletConnect first - shows ALL wallets via QR code
-    walletConnect({
-      projectId: process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID || 'a841e40e8e4a659aad0d5fb9f98bf593',
-      showQrModal: true,
-      metadata: {
-        name: 'VibeQuorum',
-        description: 'Web3 Q&A Platform with On-Chain Rewards',
-        url: 'https://vibequorum.com',
-        icons: ['https://vibequorum.com/logo.png'],
-      },
-    }),
-    // MetaMask connector - explicitly configured
-    metaMask({
-      dappMetadata: {
-        name: 'VibeQuorum',
-        url: 'https://vibequorum.com',
-      },
-    }),
-    // Coinbase Wallet
-    coinbaseWallet({
-      appName: 'VibeQuorum',
-      appLogoUrl: 'https://vibequorum.com/logo.png',
-    }),
-    // Generic injected wallet (Trust Wallet, Brave, etc.)
-    injected({
-      shimDisconnect: true, // Keep connection state after disconnect
-    }),
-    // Safe wallet connector
-    safe(),
-  ],
+  // Custom transports for each chain (preserves your RPC URLs)
   transports: {
-    [baseSepolia.id]: http(process.env.NEXT_PUBLIC_BASE_SEPOLIA_RPC_URL!),
+    [baseSepolia.id]: http(process.env.NEXT_PUBLIC_BASE_SEPOLIA_RPC_URL),
     [sepolia.id]: http(process.env.NEXT_PUBLIC_SEPOLIA_RPC_URL),
     [bscTestnet.id]: http(process.env.NEXT_PUBLIC_BSC_TESTNET_RPC_URL),
   },
