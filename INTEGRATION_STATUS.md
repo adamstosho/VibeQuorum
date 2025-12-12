@@ -139,3 +139,5 @@ NEXT_PUBLIC_REWARD_MANAGER_ADDRESS=0xF5857D5Da0c83A7294C4e39CCc2686E9c2850D9c
 2. **Verify VIBE tokens are minted** - Check the transaction on BaseScan
 3. **Check gas costs** - Make sure you have Base Sepolia ETH for gas
 
+
+
