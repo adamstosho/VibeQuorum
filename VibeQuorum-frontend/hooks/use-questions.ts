@@ -184,13 +184,25 @@ export function useAnswers(questionId: string | null) {
     queryFn: async () => {
       if (!questionId) return []
       const results = await api.answers.list(questionId)
-      return (results?.answers || []).map((a: any) => ({
-        ...a,
-        id: a._id || a.id,
-        questionId: a.questionId || questionId,
-        vibeReward: a.vibeReward || 0, // Ensure vibeReward is always a number
-        txHashes: a.txHashes || a.txHash ? [a.txHash] : [], // Handle both array and single hash
-      })) as Answer[]
+      return (results?.answers || []).map((a: any) => {
+        // Handle txHashes - ensure it's always an array
+        let txHashes = []
+        if (Array.isArray(a.txHashes)) {
+          txHashes = a.txHashes
+        } else if (a.txHash) {
+          txHashes = [a.txHash]
+        } else if (typeof a.txHash === 'string' && a.txHash.length > 0) {
+          txHashes = [a.txHash]
+        }
+        
+        return {
+          ...a,
+          id: a._id || a.id,
+          questionId: a.questionId || questionId,
+          vibeReward: a.vibeReward || 0, // Ensure vibeReward is always a number
+          txHashes: txHashes, // Always an array
+        } as Answer
+      })
     },
     enabled: !!questionId,
     staleTime: 30 * 1000, // 30 seconds
