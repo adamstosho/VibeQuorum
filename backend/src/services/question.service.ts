@@ -166,14 +166,44 @@ export class QuestionService {
     
     try {
       logger.info(`🎁 Auto-triggering reward for accepted answer: ${answerId}`);
+      logger.info(`   Answer author: ${answer.author}`);
+      logger.info(`   Answer isAccepted: ${answer.isAccepted}`);
       rewardResult = await rewardService.rewardAcceptedAnswer(answerId);
       logger.info(`✅ Reward triggered successfully: ${rewardResult.txHash}`);
     } catch (error: any) {
       // Log error but don't fail the accept operation
       // Reward can be triggered manually later via admin panel
       rewardError = error.message;
-      logger.error(`⚠️ Failed to auto-trigger reward: ${error.message}`);
-      logger.error(`   Answer ${answerId} accepted but reward not triggered. Admin can trigger manually.`);
+      logger.error(`❌ Failed to auto-trigger reward for answer ${answerId}:`);
+      logger.error(`   Error: ${error.message}`);
+      logger.error(`   Answer author: ${answer.author}`);
+      logger.error(`   Stack: ${error.stack}`);
+      logger.error(`   Answer accepted but reward not triggered. Admin can trigger manually.`);
+      
+      // Ensure we have a failed reward log entry for tracking
+      try {
+        const { RewardLog } = await import('../models/RewardLog');
+        const existingFailedLog = await RewardLog.findOne({
+          answerId: answer._id,
+          rewardType: 'accepted_answer',
+          status: 'failed',
+        });
+        
+        if (!existingFailedLog) {
+          await RewardLog.create({
+            answerId: answer._id,
+            recipient: answer.author,
+            rewardType: 'accepted_answer',
+            amount: '0',
+            txHash: 'failed',
+            status: 'failed',
+            error: error.message,
+          });
+          logger.info(`   Created failed reward log entry for tracking`);
+        }
+      } catch (logError: any) {
+        logger.error(`   Failed to create reward log entry: ${logError.message}`);
+      }
     }
 
     // Automatically trigger questioner bonus reward

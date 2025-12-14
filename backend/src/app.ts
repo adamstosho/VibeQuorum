@@ -6,6 +6,7 @@ import swaggerUi from 'swagger-ui-express';
 import { swaggerSpec } from './config/swagger';
 import { errorHandler, notFoundHandler } from './middleware/error.middleware';
 import { generalLimiter } from './middleware/rateLimit.middleware';
+import { logger } from './utils/logger';
 
 // Routes
 import authRoutes from './routes/auth.routes';
@@ -21,9 +22,7 @@ import rewardRoutes from './routes/reward.routes';
 export const createApp = (): Express => {
   const app = express();
 
-  // Security middleware
-  app.use(helmet());
-  
+  // CORS configuration - MUST be before helmet to work properly
   // CORS configuration - allow Vercel deployment and localhost
   const allowedOrigins = [
     'https://vibequorum0.vercel.app',
@@ -51,50 +50,69 @@ export const createApp = (): Express => {
   // Allow all origins in development if explicitly set
   const allowAllOrigins = process.env.ALLOW_ALL_ORIGINS === 'true';
 
-  // CORS configuration with TypeScript typing
   const corsOptions = {
     origin: (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
-      // Allow requests with no origin (like mobile apps, Postman, etc.)
-      if (!origin) return callback(null, true);
+      // Allow requests with no origin (like mobile apps or curl requests)
+      if (!origin) {
+        return callback(null, true);
+      }
 
-      // Allow all origins in development if explicitly set
+      // Allow all origins if explicitly set
       if (allowAllOrigins) {
         return callback(null, true);
       }
 
-      // Check if origin is in allowed list
-      if (allowedOrigins.includes(origin)) {
-        return callback(null, true);
-      }
-
-      // Check if origin is localhost (any port) - works in both dev and prod
-      if (origin.startsWith('http://localhost:') || origin.startsWith('http://127.0.0.1:')) {
-        return callback(null, true);
-      }
-
-      // In development, also allow any localhost origin (more permissive)
-      if (process.env.NODE_ENV === 'development') {
-        if (origin.includes('localhost') || origin.includes('127.0.0.1')) {
+      // In development, allow all localhost origins and 127.0.0.1
+      if (process.env.NODE_ENV === 'development' || process.env.NODE_ENV !== 'production') {
+        if (
+          origin.includes('localhost') ||
+          origin.includes('127.0.0.1') ||
+          origin.startsWith('http://localhost:') ||
+          origin.startsWith('http://127.0.0.1:')
+        ) {
           return callback(null, true);
         }
       }
 
-      // Reject origin
-      callback(new Error(`CORS: Origin ${origin} is not allowed`));
+      // Check if origin is in allowed list
+      if (allowedOrigins.includes(origin)) {
+        callback(null, true);
+      } else {
+        // Log the rejected origin for debugging
+        logger.warn(`[CORS] Rejected origin: ${origin} (Allowed: ${allowedOrigins.join(', ')})`);
+        callback(new Error(`CORS: Origin ${origin} is not allowed`));
+      }
     },
     credentials: true,
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
     allowedHeaders: [
       'Content-Type',
       'Authorization',
       'x-wallet-address',
       'x-signature',
       'x-timestamp',
+      'Accept',
+      'Origin',
+      'X-Requested-With',
     ],
     exposedHeaders: ['x-total-count'],
+    preflightContinue: false,
+    optionsSuccessStatus: 204, // Some legacy browsers (IE11, various SmartTVs) choke on 204
   };
-  
+
+  // Apply CORS middleware
   app.use(cors(corsOptions));
+
+  // Explicitly handle OPTIONS requests for all routes
+  app.options('*', cors(corsOptions));
+
+  // Security middleware (after CORS)
+  // In development, disable CSP to avoid blocking legitimate requests
+  app.use(helmet({
+    crossOriginResourcePolicy: { policy: "cross-origin" }, // Allow cross-origin requests
+    contentSecurityPolicy: process.env.NODE_ENV === 'production' ? undefined : false,
+    crossOriginEmbedderPolicy: false,
+  }));
 
   // Body parsing middleware
   app.use(express.json({ limit: '10mb' }));

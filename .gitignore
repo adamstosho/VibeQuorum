@@ -52,7 +52,29 @@ contracts/coverage/
 *.log
 .cache/
 
-ArchitecturalFlow.md
-PRD.md
-ProjectID.md    
-DesignSystem.md
+# Log directories
+backend/logs/
+
+*.log
+
+# Next.js cache and build
+.next/
+out/
+
+# OS files
+.DS_Store
+Thumbs.db
+*~
+
+# Temporary files
+*.tmp
+*.bak
+*.old
+*.swp
+*.swo
+
+# Keep important docs (remove from gitignore if you want them tracked)
+# ArchitecturalFlow.md
+# PRD.md
+# ProjectID.md
+# DesignSystem.md

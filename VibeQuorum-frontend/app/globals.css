@@ -267,11 +267,19 @@
   }
 
   p {
-    @apply text-base leading-relaxed;
+    @apply text-base leading-relaxed break-words;
   }
 
   code {
-    @apply text-sm font-mono text-muted-foreground;
+    @apply text-sm font-mono text-muted-foreground break-words;
+  }
+  
+  /* Ensure all text content wraps properly */
+  .prose p,
+  .prose pre,
+  .prose code {
+    @apply break-words;
+    overflow-wrap: anywhere;
   }
 }
 

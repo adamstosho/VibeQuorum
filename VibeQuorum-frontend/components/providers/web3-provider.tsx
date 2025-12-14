@@ -24,8 +24,22 @@ function getQueryClient() {
           refetchOnWindowFocus: false, // Don't refetch on window focus
           refetchOnMount: 'always', // Always refetch on mount for fresh data
           refetchOnReconnect: true, // Refetch when reconnecting
-          retry: 1, // Only retry once on failure
-          retryDelay: 1000, // Wait 1s before retry
+          retry: (failureCount, error: any) => {
+            // Don't retry on rate limit errors (429)
+            if (error?.status === 429 || error?.message?.includes('Rate limit')) {
+              return false
+            }
+            // Don't retry on network errors (they're usually temporary)
+            if (error?.message?.includes('Failed to fetch') || error?.message?.includes('Network error')) {
+              return failureCount < 2 // Retry up to 2 times for network errors
+            }
+            // Retry once for other errors
+            return failureCount < 1
+          },
+          retryDelay: (attemptIndex) => {
+            // Exponential backoff: 1s, 2s, 4s
+            return Math.min(1000 * 2 ** attemptIndex, 4000)
+          },
           structuralSharing: true, // Enable structural sharing for better performance
         },
         mutations: {

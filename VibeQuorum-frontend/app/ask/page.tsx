@@ -246,7 +246,7 @@ export default function AskPage() {
               ) : (
                 <div className="w-full h-48 bg-background p-3 text-sm overflow-auto">
                   <div className="prose prose-invert max-w-none">
-                    <p className="whitespace-pre-wrap text-foreground">{description || "No content to preview"}</p>
+                    <p className="whitespace-pre-wrap break-words text-foreground" style={{ overflowWrap: 'anywhere' }}>{description || "No content to preview"}</p>
                   </div>
                 </div>
               )}
