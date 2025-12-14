@@ -1,8 +1,41 @@
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000'
+// Smart API URL detection: 
+// - In production (Vercel frontend), use Render backend URL
+// - In localhost, use explicit localhost:4000
+// - Allow override via NEXT_PUBLIC_API_URL
+function getApiUrl(): string {
+  // If explicitly set, use that (highest priority)
+  if (process.env.NEXT_PUBLIC_API_URL) {
+    return process.env.NEXT_PUBLIC_API_URL
+  }
+
+  // In browser (client-side)
+  if (typeof window !== 'undefined') {
+    // If we're on localhost, use localhost:4000
+    if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+      return 'http://localhost:4000'
+    }
+    // In production (deployed frontend), use Render backend URL
+    // Backend is deployed on Render, not Vercel
+    return 'https://vibequorum.onrender.com'
+  }
+
+  // Server-side rendering fallback
+  // Check if we're in production build
+  if (process.env.NODE_ENV === 'production') {
+    // Use Render backend URL in production
+    return 'https://vibequorum.onrender.com'
+  }
+
+  // Default to localhost for development
+  return 'http://localhost:4000'
+}
+
+const API_URL = getApiUrl()
 
 // Log API URL in development for debugging
 if (typeof window !== 'undefined' && process.env.NODE_ENV === 'development') {
-  console.log('🔗 API URL:', API_URL)
+  console.log('🔗 API URL:', API_URL || '(relative - same origin)')
+  console.log('🌐 Current origin:', window.location.origin)
 }
 
 interface ApiResponse<T = any> {
@@ -26,9 +59,18 @@ async function request<T>(
 ): Promise<T> {
   const { method = 'GET', body, walletAddress, signature, timestamp } = options
 
-  // Ensure we have a valid API URL
-  const apiUrl = API_URL || 'http://localhost:4000'
-  if (!apiUrl) {
+  // Use API_URL (can be empty string for relative URLs in production)
+  const apiUrl = API_URL || ''
+  
+  // Validate: if we're in browser and not on localhost, empty string is OK (relative URLs)
+  // If we're on localhost, we need explicit URL
+  // If we're in SSR, we'll use the default from getApiUrl()
+  const isBrowser = typeof window !== 'undefined'
+  const isLocalhost = isBrowser && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
+  const isRelativeUrl = apiUrl === '' && isBrowser && !isLocalhost
+  
+  // Only throw error if we don't have a URL and we're not using relative URLs
+  if (!isRelativeUrl && !apiUrl) {
     throw new Error('API URL is not configured. Please set NEXT_PUBLIC_API_URL in .env.local')
   }
 
@@ -72,7 +114,9 @@ async function request<T>(
     config.body = JSON.stringify(body)
   }
 
-  const url = `${apiUrl}${endpoint}`
+  // Build URL: if apiUrl is empty (relative), just use endpoint
+  // Otherwise, concatenate apiUrl + endpoint
+  const url = apiUrl ? `${apiUrl}${endpoint}` : endpoint
 
   try {
     // Log request in development

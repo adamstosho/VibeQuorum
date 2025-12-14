@@ -3,14 +3,32 @@
  * Use this to check if the backend server is available before making requests
  */
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000'
+// Smart API URL detection (same logic as api.ts)
+function getApiUrl(): string {
+  if (process.env.NEXT_PUBLIC_API_URL) {
+    return process.env.NEXT_PUBLIC_API_URL
+  }
+  if (typeof window !== 'undefined') {
+    if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+      return 'http://localhost:4000'
+    }
+    return '' // Relative URLs in production
+  }
+  if (process.env.NODE_ENV === 'production' && process.env.VERCEL) {
+    return ''
+  }
+  return 'http://localhost:4000'
+}
+
+const API_URL = getApiUrl()
 
 export async function checkApiHealth(): Promise<{ healthy: boolean; message: string }> {
   try {
     const controller = new AbortController()
     const timeoutId = setTimeout(() => controller.abort(), 5000) // 5 second timeout
 
-    const response = await fetch(`${API_URL}/health`, {
+    const healthUrl = API_URL ? `${API_URL}/health` : '/health'
+    const response = await fetch(healthUrl, {
       method: 'GET',
       signal: controller.signal,
     })

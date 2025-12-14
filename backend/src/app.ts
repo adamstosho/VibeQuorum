@@ -33,28 +33,45 @@ export const createApp = (): Express => {
     'http://127.0.0.1:3001',
   ];
 
-  // Add custom frontend URL if provided
+  // Add custom frontend URL if provided (supports multiple URLs separated by comma)
   if (process.env.FRONTEND_URL) {
-    const customUrl = process.env.FRONTEND_URL.trim();
-    if (!allowedOrigins.includes(customUrl)) {
-      allowedOrigins.push(customUrl);
-      // Also add without trailing slash if it has one
-      if (customUrl.endsWith('/')) {
-        allowedOrigins.push(customUrl.slice(0, -1));
-      } else {
-        allowedOrigins.push(customUrl + '/');
+    const frontendUrls = process.env.FRONTEND_URL.split(',').map(url => url.trim());
+    frontendUrls.forEach(customUrl => {
+      if (customUrl && !allowedOrigins.includes(customUrl)) {
+        allowedOrigins.push(customUrl);
+        // Also add without trailing slash if it has one
+        if (customUrl.endsWith('/')) {
+          allowedOrigins.push(customUrl.slice(0, -1));
+        } else {
+          allowedOrigins.push(customUrl + '/');
+        }
       }
-    }
+    });
   }
 
+  // In serverless (Vercel), same-origin requests don't need CORS
+  // But we still need to handle cross-origin requests
+  const isServerless = process.env.VERCEL === '1' || process.env.VERCEL_ENV;
+  const isDevelopment = process.env.NODE_ENV === 'development' || process.env.NODE_ENV !== 'production';
+  
   // Allow all origins in development if explicitly set
   const allowAllOrigins = process.env.ALLOW_ALL_ORIGINS === 'true';
 
   const corsOptions = {
     origin: (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
-      // Allow requests with no origin (like mobile apps or curl requests)
+      // Allow requests with no origin (like mobile apps, curl requests, or same-origin in serverless)
+      // In Vercel serverless, same-origin requests may not have an origin header
       if (!origin) {
-        return callback(null, true);
+        // In serverless, same-origin requests are fine
+        if (isServerless) {
+          return callback(null, true);
+        }
+        // In development, allow no-origin requests (Postman, curl, etc.)
+        if (isDevelopment) {
+          return callback(null, true);
+        }
+        // In production non-serverless, be more strict
+        return callback(null, true); // Still allow for API tools
       }
 
       // Allow all origins if explicitly set
@@ -63,7 +80,7 @@ export const createApp = (): Express => {
       }
 
       // In development, allow all localhost origins and 127.0.0.1
-      if (process.env.NODE_ENV === 'development' || process.env.NODE_ENV !== 'production') {
+      if (isDevelopment) {
         if (
           origin.includes('localhost') ||
           origin.includes('127.0.0.1') ||
@@ -74,12 +91,24 @@ export const createApp = (): Express => {
         }
       }
 
+      // Allow Vercel frontend domains (for Render backend serving Vercel frontend)
+      const vercelPattern = /^https:\/\/.*\.vercel\.app$/;
+      if (vercelPattern.test(origin)) {
+        return callback(null, true);
+      }
+      // Also allow the specific domain
+      if (origin.includes('vibequorum0.vercel.app')) {
+        return callback(null, true);
+      }
+
       // Check if origin is in allowed list
       if (allowedOrigins.includes(origin)) {
         callback(null, true);
       } else {
-        // Log the rejected origin for debugging
-        logger.warn(`[CORS] Rejected origin: ${origin} (Allowed: ${allowedOrigins.join(', ')})`);
+        // Log the rejected origin for debugging (only in development)
+        if (isDevelopment) {
+          logger.warn(`[CORS] Rejected origin: ${origin} (Allowed: ${allowedOrigins.join(', ')})`);
+        }
         callback(new Error(`CORS: Origin ${origin} is not allowed`));
       }
     },
@@ -118,21 +147,45 @@ export const createApp = (): Express => {
   app.use(express.json({ limit: '10mb' }));
   app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-  // Logging
+  // Logging with enhanced request info
   if (process.env.NODE_ENV !== 'test') {
-    app.use(morgan('combined'));
+    // Custom morgan format to include origin for CORS debugging
+    morgan.token('origin', (req: any) => req.headers.origin || 'no-origin');
+    morgan.token('cors-status', (req: any) => {
+      const origin = req.headers.origin;
+      if (!origin) return 'same-origin';
+      return origin.includes('localhost') || origin.includes('127.0.0.1') ? 'localhost' : 'cross-origin';
+    });
+    
+    app.use(morgan(':method :url :status :response-time ms - :origin (:cors-status)', {
+      skip: (req: any) => {
+        // Skip logging health checks in production
+        return process.env.NODE_ENV === 'production' && req.url === '/health';
+      }
+    }));
   }
 
   // Rate limiting
   app.use(generalLimiter);
 
-  // Health check endpoint
-  app.get('/health', (_req, res) => {
-    res.json({
+  // Health check endpoint with detailed info
+  app.get('/health', (req, res) => {
+    const healthInfo = {
       success: true,
       message: 'VibeQuorum API is running',
       timestamp: new Date().toISOString(),
-    });
+      environment: process.env.NODE_ENV || 'development',
+      isServerless: !!(process.env.VERCEL || process.env.VERCEL_ENV),
+      origin: req.headers.origin || 'no-origin',
+      host: req.headers.host || 'unknown',
+    };
+    
+    // Log health check in development
+    if (process.env.NODE_ENV === 'development') {
+      logger.info('🏥 Health check:', healthInfo);
+    }
+    
+    res.json(healthInfo);
   });
 
   // Swagger documentation

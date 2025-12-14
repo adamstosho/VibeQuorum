@@ -34,11 +34,11 @@ const startServer = async (): Promise<void> => {
     const baseUrl = renderUrl 
       ? renderUrl 
       : environment === 'production' 
-        ? `https://your-render-url.onrender.com`
+        ? `https://vibequorum.onrender.com`
         : `http://localhost:${PORT}`;
 
-    // Start server
-    app.listen(PORT, '0.0.0.0', () => {
+    // Start server with error handling for port conflicts
+    const server = app.listen(PORT, '0.0.0.0', () => {
       logger.info('');
       logger.info('═══════════════════════════════════════════════════════════');
       logger.info('✅ ✅ ✅  BACKEND SUCCESSFULLY DEPLOYED AND RUNNING  ✅ ✅ ✅');
@@ -76,6 +76,37 @@ const startServer = async (): Promise<void> => {
       }
       
       logger.info('');
+    });
+
+    // Handle server errors (e.g., port already in use)
+    server.on('error', (err: NodeJS.ErrnoException) => {
+      if (err.code === 'EADDRINUSE') {
+        logger.error('');
+        logger.error('═══════════════════════════════════════════════════════════');
+        logger.error('❌ ❌ ❌  PORT ALREADY IN USE  ❌ ❌ ❌');
+        logger.error('═══════════════════════════════════════════════════════════');
+        logger.error(`Port ${PORT} is already in use by another process.`);
+        logger.error('');
+        logger.error('To fix this, you can:');
+        logger.error(`1. Kill the process using port ${PORT}:`);
+        logger.error(`   lsof -ti:${PORT} | xargs kill -9`);
+        logger.error(`   OR`);
+        logger.error(`   kill -9 $(lsof -ti:${PORT})`);
+        logger.error('');
+        logger.error(`2. Use a different port by setting PORT environment variable:`);
+        logger.error(`   PORT=4001 npm run dev`);
+        logger.error('');
+        logger.error(`3. Find what's using the port:`);
+        logger.error(`   lsof -i:${PORT}`);
+        logger.error('═══════════════════════════════════════════════════════════');
+        process.exit(1);
+      } else {
+        logger.error(`❌ Server error: ${err.message}`);
+        if (err.stack) {
+          logger.error(err.stack);
+        }
+        process.exit(1);
+      }
     });
   } catch (error: any) {
     logger.error('');
