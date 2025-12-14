@@ -23,7 +23,33 @@ export const createApp = (): Express => {
   const app = express();
 
   // CORS configuration - MUST be before helmet to work properly
-  // CORS configuration - more permissive in development
+  // CORS configuration - allow Vercel deployment and localhost
+  const allowedOrigins = [
+    'https://vibequorum0.vercel.app',
+    'https://vibequorum0.vercel.app/',
+    'http://localhost:3000',
+    'http://localhost:3001',
+    'http://127.0.0.1:3000',
+    'http://127.0.0.1:3001',
+  ];
+
+  // Add custom frontend URL if provided
+  if (process.env.FRONTEND_URL) {
+    const customUrl = process.env.FRONTEND_URL.trim();
+    if (!allowedOrigins.includes(customUrl)) {
+      allowedOrigins.push(customUrl);
+      // Also add without trailing slash if it has one
+      if (customUrl.endsWith('/')) {
+        allowedOrigins.push(customUrl.slice(0, -1));
+      } else {
+        allowedOrigins.push(customUrl + '/');
+      }
+    }
+  }
+
+  // Allow all origins in development if explicitly set
+  const allowAllOrigins = process.env.ALLOW_ALL_ORIGINS === 'true';
+
   const corsOptions = {
     origin: (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
       // Allow requests with no origin (like mobile apps or curl requests)
@@ -31,12 +57,10 @@ export const createApp = (): Express => {
         return callback(null, true);
       }
 
-      const allowedOrigins = [
-        process.env.FRONTEND_URL || 'http://localhost:3000',
-        'http://localhost:3000',
-        'http://127.0.0.1:3000',
-        'http://localhost:3001', // Sometimes Next.js uses 3001
-      ];
+      // Allow all origins if explicitly set
+      if (allowAllOrigins) {
+        return callback(null, true);
+      }
 
       // In development, allow all localhost origins and 127.0.0.1
       if (process.env.NODE_ENV === 'development' || process.env.NODE_ENV !== 'production') {
@@ -50,12 +74,13 @@ export const createApp = (): Express => {
         }
       }
 
+      // Check if origin is in allowed list
       if (allowedOrigins.includes(origin)) {
         callback(null, true);
       } else {
         // Log the rejected origin for debugging
         logger.warn(`[CORS] Rejected origin: ${origin} (Allowed: ${allowedOrigins.join(', ')})`);
-        callback(new Error('Not allowed by CORS'));
+        callback(new Error(`CORS: Origin ${origin} is not allowed`));
       }
     },
     credentials: true,
