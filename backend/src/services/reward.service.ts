@@ -41,15 +41,32 @@ export class RewardService {
       throw new Error('Answer is not accepted');
     }
 
-    // Check if already rewarded
+    // Validate answer author
+    if (!answer.author || !ethers.isAddress(answer.author)) {
+      throw new Error(`Invalid answer author address: ${answer.author}`);
+    }
+
+    // Normalize address to checksum format
+    const recipientAddress = ethers.getAddress(answer.author.toLowerCase());
+    logger.info(`🎁 Processing reward for answer ${answerId}`);
+    logger.info(`   Recipient address: ${recipientAddress}`);
+    logger.info(`   Answer author (original): ${answer.author}`);
+
+    // Check if already rewarded (but allow retry if previous attempt failed)
     const existingReward = await RewardLog.findOne({
       answerId,
       rewardType: 'accepted_answer',
       status: 'confirmed',
     });
 
-    if (existingReward) {
+    if (existingReward && existingReward.txHash !== 'failed') {
       throw new Error('Answer already rewarded');
+    }
+
+    // If there's a failed reward, delete it to allow retry
+    if (existingReward && existingReward.status === 'failed') {
+      logger.info(`🔄 Deleting failed reward log for answer ${answerId} to allow retry`);
+      await RewardLog.deleteOne({ _id: existingReward._id });
     }
 
     const REWARD_MANAGER_ADDRESS = process.env.REWARD_MANAGER_ADDRESS;
@@ -59,6 +76,14 @@ export class RewardService {
 
     try {
       const wallet = getAdminWallet();
+      const provider = getProvider();
+
+      // Verify contract exists before proceeding
+      const contractCode = await provider.getCode(REWARD_MANAGER_ADDRESS);
+      if (contractCode === '0x' || contractCode === '0x0') {
+        throw new Error(`RewardManager contract does not exist at address ${REWARD_MANAGER_ADDRESS}. Please deploy the contract or update REWARD_MANAGER_ADDRESS in .env`);
+      }
+
       const rewardManagerContract = new ethers.Contract(
         REWARD_MANAGER_ADDRESS,
         REWARD_MANAGER_ABI,
@@ -67,10 +92,12 @@ export class RewardService {
 
       // Generate answer ID hash (bytes32) from MongoDB answer ID string
       const answerIdBytes = await rewardManagerContract.generateAnswerIdFromString(answerId);
-      
+
       // Convert question ID (MongoDB ObjectId) to uint256
       // Use the last 8 bytes of the ObjectId hex string as uint256
-      const questionIdHex = answer.questionId.toString();
+      // Note: answer.questionId is populated, so we need to access _id or handle strictly
+      const questionIdObj = answer.questionId as any;
+      const questionIdHex = (questionIdObj._id || questionIdObj).toString();
       const questionIdNum = BigInt('0x' + questionIdHex.slice(-16) || '0');
 
       // Check if already rewarded on-chain
@@ -79,21 +106,22 @@ export class RewardService {
         throw new Error('Answer already rewarded on-chain');
       }
 
-      // Get reward amount from contract
-      const rewardAmount = await rewardManagerContract.acceptedAnswerReward();
+      // Get reward amount from contract (not strictly needed for tx but good for info if we wanted to log it before)
+      // const rewardAmount = await rewardManagerContract.acceptedAnswerReward();
 
       // Call RewardManager.rewardAcceptedAnswer()
       logger.info(`📤 Calling RewardManager.rewardAcceptedAnswer()`);
-      logger.info(`   Recipient: ${answer.author}`);
+      logger.info(`   Recipient: ${recipientAddress}`);
       logger.info(`   Answer ID: ${answerId}`);
+      logger.info(`   Answer ID (bytes32): ${answerIdBytes}`);
       logger.info(`   Question ID: ${questionIdNum.toString()}`);
-      
+
       const tx = await rewardManagerContract.rewardAcceptedAnswer(
-        answer.author,
+        recipientAddress,
         answerIdBytes,
         questionIdNum
       );
-      
+
       logger.info(`✅ Reward transaction sent: ${tx.hash}`);
 
       // Wait for confirmation
@@ -106,7 +134,7 @@ export class RewardService {
       // Save reward log
       await RewardLog.create({
         answerId,
-        recipient: answer.author,
+        recipient: recipientAddress.toLowerCase(),
         rewardType: 'accepted_answer',
         amount: actualAmount.toString(),
         txHash,
@@ -122,7 +150,7 @@ export class RewardService {
 
       // Update user reputation
       await User.findOneAndUpdate(
-        { walletAddress: answer.author },
+        { walletAddress: recipientAddress.toLowerCase() },
         { $inc: { reputation: 50 } }
       );
 
@@ -133,16 +161,23 @@ export class RewardService {
     } catch (error: any) {
       logger.error(`❌ Reward transaction failed: ${error.message}`);
       logger.error(`   Error details:`, error);
+      logger.error(`   Recipient address: ${recipientAddress}`);
 
       // Save failed reward log
       await RewardLog.create({
         answerId,
-        recipient: answer.author,
+        recipient: recipientAddress.toLowerCase(),
         rewardType: 'accepted_answer',
         amount: '0', // Unknown amount on failure
         txHash: 'failed',
         status: 'failed',
         error: error.message,
+      });
+
+      // Also update answer to mark that reward was attempted but failed
+      // This helps admin panel identify failed rewards
+      await Answer.findByIdAndUpdate(answerId, {
+        $push: { txHashes: 'failed' },
       });
 
       throw new Error(`Reward transaction failed: ${error.message}`);
@@ -211,7 +246,9 @@ export class RewardService {
       );
 
       const answerIdBytes = await rewardManagerContract.generateAnswerIdFromString(answerId);
-      const questionIdHex = answer.questionId.toString();
+
+      const questionIdObj = answer.questionId as any;
+      const questionIdHex = (questionIdObj._id || questionIdObj).toString();
       const questionIdNum = BigInt('0x' + questionIdHex.slice(-16) || '0');
 
       // Check if already rewarded on-chain (for upvote threshold)
@@ -230,19 +267,19 @@ export class RewardService {
         }
       }
 
-      const rewardAmount = await rewardManagerContract.upvoteReward();
+      // const rewardAmount = await rewardManagerContract.upvoteReward();
 
       logger.info(`📤 Calling RewardManager.rewardUpvoteThreshold()`);
       logger.info(`   Recipient: ${answer.author}`);
       logger.info(`   Answer ID: ${answerId}`);
       logger.info(`   Question ID: ${questionIdNum.toString()}`);
-      
+
       const tx = await rewardManagerContract.rewardUpvoteThreshold(
         answer.author,
         answerIdBytes,
         questionIdNum
       );
-      
+
       logger.info(`✅ Upvote threshold reward transaction sent: ${tx.hash}`);
 
       const receipt = await tx.wait();
@@ -328,17 +365,17 @@ export class RewardService {
       const questionIdHex = question._id.toString();
       const questionIdNum = BigInt('0x' + questionIdHex.slice(-16) || '0');
 
-      const rewardAmount = await rewardManagerContract.questionerBonus();
+      // const rewardAmount = await rewardManagerContract.questionerBonus();
 
       logger.info(`📤 Calling RewardManager.rewardQuestioner()`);
       logger.info(`   Recipient: ${question.author}`);
       logger.info(`   Question ID: ${questionIdNum.toString()}`);
-      
+
       const tx = await rewardManagerContract.rewardQuestioner(
         question.author,
         questionIdNum
       );
-      
+
       logger.info(`✅ Questioner bonus transaction sent: ${tx.hash}`);
 
       const receipt = await tx.wait();

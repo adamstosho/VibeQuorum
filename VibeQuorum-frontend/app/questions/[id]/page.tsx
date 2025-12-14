@@ -255,10 +255,10 @@ export default function QuestionDetailPage() {
         </Link>
 
         {/* Question */}
-        <article className="card-base space-y-6 animate-slide-in-up">
+        <article className="card-base space-y-6 animate-slide-in-up overflow-hidden">
           {/* Header */}
           <div className="space-y-4">
-            <div className="flex items-start gap-4">
+            <div className="flex items-start gap-4 min-w-0">
               {/* Vote Column */}
               <div className="flex flex-col items-center gap-1 min-w-[40px]">
                 <button 
@@ -279,9 +279,9 @@ export default function QuestionDetailPage() {
               </div>
 
               {/* Content */}
-              <div className="flex-1 space-y-4">
+              <div className="flex-1 space-y-4 min-w-0">
                 <div className="flex items-start gap-3">
-                  <h1 className="text-2xl font-bold flex-1">{question.title}</h1>
+                  <h1 className="text-2xl font-bold flex-1 break-words">{question.title}</h1>
                   {question.status === 'closed' && (
                     <span className="flex items-center gap-1 bg-success/20 text-success px-2 py-1 rounded text-xs">
                       <CheckCircle className="h-3 w-3" />
@@ -291,7 +291,7 @@ export default function QuestionDetailPage() {
                 </div>
 
                 <div className="prose prose-invert max-w-none">
-                  <p className="whitespace-pre-wrap text-foreground">{question.description}</p>
+                  <p className="whitespace-pre-wrap break-words text-foreground" style={{ overflowWrap: 'anywhere' }}>{question.description}</p>
                 </div>
 
                 {/* Tags */}
@@ -358,12 +358,12 @@ export default function QuestionDetailPage() {
               {answers.map((answer, idx) => (
                 <div
                   key={answer.id}
-                  className={`card-base space-y-4 animate-slide-in-up ${
+                  className={`card-base space-y-4 animate-slide-in-up overflow-hidden ${
                     answer.isAccepted ? 'border-success/50 bg-success/5' : ''
                   }`}
                   style={{ animationDelay: `${idx * 50}ms` }}
                 >
-                  <div className="flex items-start gap-4">
+                  <div className="flex items-start gap-4 min-w-0">
                     {/* Vote Column */}
                     <div className="flex flex-col items-center gap-1 min-w-[40px]">
                       <button 
@@ -417,20 +417,20 @@ export default function QuestionDetailPage() {
                       )}
 
                       <div className="prose prose-invert max-w-none">
-                        <p className="whitespace-pre-wrap text-foreground">{answer.content}</p>
+                        <p className="whitespace-pre-wrap break-words text-foreground" style={{ overflowWrap: 'anywhere' }}>{answer.content}</p>
                       </div>
 
                       {/* Reward Badge */}
                       {answer.vibeReward > 0 && (
-                        <div className="flex items-center gap-2 bg-accent/10 border border-accent/30 rounded-lg px-3 py-2 text-sm">
-                          <Zap className="h-4 w-4 text-accent" />
-                          <span className="text-accent font-bold">+{answer.vibeReward} VIBE</span>
+                        <div className="flex flex-wrap items-center gap-2 bg-accent/10 border border-accent/30 rounded-lg px-3 py-2 text-sm">
+                          <Zap className="h-4 w-4 text-accent flex-shrink-0" />
+                          <span className="text-accent font-bold whitespace-nowrap">+{answer.vibeReward} VIBE</span>
                           {answer.txHashes.length > 0 && (
                             <a
                               href={`https://sepolia.basescan.org/tx/${answer.txHashes[0]}`}
                               target="_blank"
                               rel="noopener noreferrer"
-                              className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+                              className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground whitespace-nowrap"
                             >
                               <ExternalLink className="h-3 w-3" />
                               View tx
@@ -440,13 +440,13 @@ export default function QuestionDetailPage() {
                       )}
 
                       {/* Meta */}
-                      <div className="flex items-center justify-between pt-4 border-t border-border text-sm">
-                        <div className="flex items-center gap-2">
+                      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 pt-4 border-t border-border text-sm">
+                        <div className="flex flex-wrap items-center gap-2">
                           <span className="text-muted-foreground">Answered by </span>
-                          <span className="font-mono text-primary">
+                          <span className="font-mono text-primary break-all">
                             {answer.displayName || answer.author.slice(0, 6) + '...' + answer.author.slice(-4)}
                           </span>
-                          <span className="text-muted-foreground">{formatTimeAgo(answer.createdAt)}</span>
+                          <span className="text-muted-foreground whitespace-nowrap">{formatTimeAgo(answer.createdAt)}</span>
                         </div>
                       </div>
                     </div>
@@ -505,12 +505,12 @@ export default function QuestionDetailPage() {
                 disabled={isSubmitting}
               />
 
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
+              <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
+                <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 flex-1 min-w-0">
                   <button
                     onClick={handleGenerateAI}
                     disabled={isGeneratingAI || isSubmitting}
-                    className="btn-secondary gap-2 text-sm disabled:opacity-50"
+                    className="btn-secondary gap-2 text-sm disabled:opacity-50 whitespace-nowrap"
                   >
                     {isGeneratingAI ? (
                       <>
@@ -524,14 +524,14 @@ export default function QuestionDetailPage() {
                       </>
                     )}
                   </button>
-                  <p className="text-xs text-muted-foreground">
+                  <p className="text-xs text-muted-foreground break-words">
                     {answerContent.length} characters • Accepted answers earn VIBE tokens!
                   </p>
                 </div>
                 <button
                   onClick={handleSubmitAnswer}
                   disabled={isSubmitting || !answerContent.trim()}
-                  className="btn-primary gap-2 disabled:opacity-50"
+                  className="btn-primary gap-2 disabled:opacity-50 whitespace-nowrap"
                 >
                   {isSubmitting ? (
                     <>

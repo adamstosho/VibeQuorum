@@ -10,9 +10,13 @@ import { ConnectButton } from "@rainbow-me/rainbowkit"
 import { useQuestions } from "@/hooks/use-questions"
 import { api } from "@/lib/api"
 import { useApiAuth } from "@/hooks/use-api-auth"
+import { useQueryClient } from "@tanstack/react-query"
+import { getExplorerTxUrl, DEFAULT_CHAIN_ID } from "@/lib/web3/config"
 
 export default function AdminPage() {
   const { address, isConnected, shortAddress, chainName } = useWallet()
+  const { signRequest } = useApiAuth() // Add signRequest for API authentication
+  const queryClient = useQueryClient() // Add query client for cache invalidation
   const { hasRole: hasTokenRole, isAdmin: isTokenAdmin } = useVibeToken()
   const { 
     hasRole: hasRewardRole, 
@@ -87,10 +91,19 @@ export default function AdminPage() {
     }
   }, [questions, allAnswers])
 
-  // Get pending rewards (accepted answers without tx hash)
+  // Get pending rewards (accepted answers without tx hash or with failed tx hash)
   const pendingRewards = useMemo(() => {
     return allAnswers
-      .filter(a => a.isAccepted && (!a.txHash || a.txHash.length === 0))
+      .filter(a => {
+        if (!a.isAccepted) return false
+        // Check if answer has any successful transaction hashes
+        const txHashes = a.txHashes && Array.isArray(a.txHashes) ? a.txHashes : []
+        const txHash = a.txHash && typeof a.txHash === 'string' ? a.txHash : null
+        const allHashes = [...txHashes, txHash].filter(Boolean)
+        // Filter out 'failed' entries - we want to show these as pending so admin can retry
+        const successfulHashes = allHashes.filter((h: string) => h && h !== 'failed' && h.length > 10)
+        return successfulHashes.length === 0 // Only include if no successful tx hash
+      })
       .map(a => {
         // Find question by matching questionId (handle both _id and id formats)
         const answerQuestionId = a.questionId?._id || a.questionId || a.questionId?.toString()
@@ -112,18 +125,40 @@ export default function AdminPage() {
 
   // Get recent transactions (answers with tx hashes)
   const recentTransactions = useMemo(() => {
-    return allAnswers
-      .filter(a => a.txHash && a.txHash.length > 0)
-      .map(a => ({
-        id: a._id || a.id,
+    // Filter answers that have transaction hashes (either txHashes array or txHash string)
+    const answersWithTx = allAnswers.filter(a => {
+      const hasTxHashes = a.txHashes && Array.isArray(a.txHashes) && a.txHashes.length > 0
+      const hasTxHash = a.txHash && typeof a.txHash === 'string' && a.txHash.length > 0 && a.txHash !== 'failed'
+      return hasTxHashes || hasTxHash
+    })
+    
+    // Map to transaction format - handle both txHashes array and txHash string
+    const transactions = answersWithTx.flatMap(a => {
+      // Get all transaction hashes (from array or single string)
+      let txHashes = []
+      if (a.txHashes && Array.isArray(a.txHashes) && a.txHashes.length > 0) {
+        txHashes = a.txHashes.filter((tx: string) => tx && tx !== 'failed')
+      } else if (a.txHash && typeof a.txHash === 'string' && a.txHash !== 'failed') {
+        txHashes = [a.txHash]
+      }
+      
+      // Create one transaction entry per tx hash
+      return txHashes.map((txHash: string, index: number) => ({
+        id: `${a._id || a.id}-${index}`,
+        answerId: a._id || a.id,
         action: a.isAccepted ? 'Answer Accepted' : 'Upvote Reward',
         amount: a.vibeReward || 0,
         wallet: a.author?.slice(0, 6) + '...' + a.author?.slice(-4) || 'Unknown',
-        hash: a.txHash?.slice(0, 10) + '...' + a.txHash?.slice(-8) || '',
-        fullHash: a.txHash,
+        hash: txHash?.slice(0, 10) + '...' + txHash?.slice(-8) || '',
+        fullHash: txHash,
         status: 'success' as const,
-        timestamp: a.createdAt || new Date(),
+        timestamp: a.updatedAt || a.createdAt || new Date(),
       }))
+    })
+    
+    // Sort by timestamp (newest first) and limit to 10
+    return transactions
+      .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
       .slice(0, 10)
   }, [allAnswers])
 
@@ -146,40 +181,78 @@ export default function AdminPage() {
     
     try {
       const auth = await signRequest()
+      console.log('🔐 Triggering rewards with auth:', { address, hasSignature: !!auth?.signature })
       
       // Process each selected reward
+      const results = []
       for (const rewardId of selectedRewards) {
         const reward = pendingRewards.find(r => r.id === rewardId)
         if (reward) {
-          // Use backend API to trigger reward (backend handles on-chain reward)
-          await api.rewards.triggerReward(
-            rewardId,
-            address,
-            auth?.signature,
-            auth?.timestamp
-          )
-          // Backend already updates the answer with txHash
+          try {
+            console.log(`🎁 Triggering reward for answer: ${rewardId}`)
+            // Use backend API to trigger reward (backend handles on-chain reward)
+            const result = await api.rewards.triggerReward(
+              rewardId,
+              address,
+              auth?.signature,
+              auth?.timestamp
+            )
+            console.log(`✅ Reward triggered successfully:`, result)
+            results.push({ rewardId, success: true, result })
+            // Backend already updates the answer with txHash
+          } catch (error: any) {
+            console.error(`❌ Failed to trigger reward for ${rewardId}:`, error)
+            results.push({ rewardId, success: false, error: error.message })
+            // Continue with other rewards even if one fails
+          }
         }
       }
+      
+      console.log('📊 Reward trigger results:', results)
       
       setTxStatus('success')
       setSelectedRewards([])
       
-      // Refresh data from API
+      // Invalidate all queries to force refresh
+      await queryClient.invalidateQueries({ queryKey: ['questions'] })
+      await queryClient.invalidateQueries({ queryKey: ['answers'] })
+      
+      // Refresh questions
       await refreshQuestions()
-      // Re-fetch answers
+      
+      // Wait a moment for backend to update
+      await new Promise(resolve => setTimeout(resolve, 1000))
+      
+      // Re-fetch all answers with fresh data
       const answerPromises = questions.map(async (q) => {
         try {
           const result = await api.answers.list(q.id)
           return result?.answers || []
         } catch (error) {
+          console.error(`Failed to fetch answers for question ${q.id}:`, error)
           return []
         }
       })
       const answersArrays = await Promise.all(answerPromises)
-      setAllAnswers(answersArrays.flat())
+      const freshAnswers = answersArrays.flat()
+      setAllAnswers(freshAnswers)
       
-      setTimeout(() => setTxStatus('idle'), 3000)
+      // Force another refresh after a delay to ensure blockchain data is indexed
+      setTimeout(async () => {
+        await refreshQuestions()
+        const delayedAnswerPromises = questions.map(async (q) => {
+          try {
+            const result = await api.answers.list(q.id)
+            return result?.answers || []
+          } catch (error) {
+            return []
+          }
+        })
+        const delayedAnswersArrays = await Promise.all(delayedAnswerPromises)
+        setAllAnswers(delayedAnswersArrays.flat())
+      }, 3000)
+      
+      setTimeout(() => setTxStatus('idle'), 5000)
     } catch (error) {
       console.error('Failed to trigger rewards:', error)
       setTxStatus('error')
@@ -381,8 +454,8 @@ export default function AdminPage() {
                             className="rounded cursor-pointer"
                           />
                         </td>
-                        <td className="py-3 px-3 font-mono text-xs line-clamp-1 max-w-[200px]">{reward.questionTitle}</td>
-                        <td className="py-3 px-3 font-mono text-xs">
+                        <td className="py-3 px-3 font-mono text-xs break-words max-w-[200px] min-w-[150px]">{reward.questionTitle}</td>
+                        <td className="py-3 px-3 font-mono text-xs break-all">
                           {reward.displayName || (reward.answerer.slice(0, 6) + '...' + reward.answerer.slice(-4))}
                         </td>
                         <td className="py-3 px-3 font-bold text-accent">{reward.amount} VIBE</td>
@@ -473,18 +546,24 @@ export default function AdminPage() {
                   className="flex flex-col sm:flex-row items-start sm:items-center justify-between p-4 bg-muted/20 rounded border border-border/50 hover:border-primary/50 hover:bg-muted/30 transition-all duration-200 animate-slide-in-up gap-3"
                   style={{ animationDelay: `${idx * 50}ms` }}
                 >
-                  <div className="space-y-1 flex-1">
-                    <p className="font-medium text-sm">{tx.action}</p>
-                    <p className="text-xs text-muted-foreground font-mono">{tx.wallet}</p>
+                  <div className="space-y-1 flex-1 min-w-0">
+                    <p className="font-medium text-sm break-words">{tx.action}</p>
+                    <p className="text-xs text-muted-foreground font-mono break-all">{tx.wallet}</p>
                   </div>
 
-                  <div className="flex items-center gap-3 sm:gap-4">
-                    <span className="font-bold text-accent">{tx.amount} VIBE</span>
+                  <div className="flex flex-wrap items-center gap-2 sm:gap-3 sm:gap-4">
+                    <span className="font-bold text-accent whitespace-nowrap">{tx.amount} VIBE</span>
 
-                    <span className="flex items-center gap-1 text-success text-xs whitespace-nowrap">
+                    <a
+                      href={getExplorerTxUrl(DEFAULT_CHAIN_ID, tx.fullHash)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center gap-1 text-success text-xs whitespace-nowrap hover:underline flex-shrink-0"
+                    >
                       <CheckCircle className="h-4 w-4" />
-                      <span className="font-mono">{tx.hash}</span>
-                    </span>
+                      <span className="font-mono break-all">{tx.hash}</span>
+                      <ExternalLink className="h-3 w-3 flex-shrink-0" />
+                    </a>
 
                     <span className="text-xs text-muted-foreground whitespace-nowrap">
                       {formatTimeAgo(tx.timestamp)}

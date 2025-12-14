@@ -17,7 +17,7 @@ const RewardLogSchema = new Schema<IRewardLog>(
     answerId: {
       type: Schema.Types.ObjectId,
       ref: 'Answer',
-      required: function(this: IRewardLog) {
+      required: function (this: IRewardLog) {
         return this.rewardType !== 'questioner_bonus';
       },
       index: true,
@@ -25,7 +25,7 @@ const RewardLogSchema = new Schema<IRewardLog>(
     questionId: {
       type: Schema.Types.ObjectId,
       ref: 'Question',
-      required: function(this: IRewardLog) {
+      required: function (this: IRewardLog) {
         return this.rewardType === 'questioner_bonus';
       },
       index: true,
@@ -48,7 +48,6 @@ const RewardLogSchema = new Schema<IRewardLog>(
     txHash: {
       type: String,
       required: true,
-      unique: true,
       index: true,
     },
     status: {

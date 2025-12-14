@@ -49,13 +49,23 @@ async function request<T>(
   }
 
   // Longer timeout for AI requests (120 seconds)
+  // Also longer timeout for write operations (POST, PUT, DELETE) which might take longer
   const isAIRequest = endpoint.includes('/ai-draft')
-  const timeout = isAIRequest ? 120000 : 10000 // 120s for AI, 10s for others (reduced from 30s)
+  const isWriteOperation = method !== 'GET'
+  const timeout = isAIRequest 
+    ? 120000  // 120s for AI requests
+    : isWriteOperation 
+      ? 30000  // 30s for write operations (POST, PUT, DELETE)
+      : 15000  // 15s for read operations (GET)
+
+  // Create AbortController for timeout (more compatible than AbortSignal.timeout)
+  const controller = new AbortController()
+  const timeoutId = setTimeout(() => controller.abort(), timeout)
 
   const config: RequestInit = {
     method,
     headers,
-    signal: AbortSignal.timeout(timeout),
+    signal: controller.signal,
   }
 
   if (body && method !== 'GET') {
@@ -67,10 +77,13 @@ async function request<T>(
   try {
     // Log request in development
     if (typeof window !== 'undefined' && process.env.NODE_ENV === 'development') {
-      console.log(`📤 API Request: ${method} ${url}`)
+      console.log(`📤 API Request: ${method} ${url} (timeout: ${timeout/1000}s)`)
     }
     
     const response = await fetch(url, config)
+    
+    // Clear timeout on successful response
+    clearTimeout(timeoutId)
     
     // Log response in development
     if (typeof window !== 'undefined' && process.env.NODE_ENV === 'development') {
@@ -78,6 +91,30 @@ async function request<T>(
     }
     
     if (!response.ok) {
+      // Handle rate limiting (429) with retry info
+      if (response.status === 429) {
+        const retryAfter = response.headers.get('Retry-After') || response.headers.get('X-RateLimit-Reset')
+        let errorMessage = 'Too many requests. Please wait a moment and try again.'
+        
+        try {
+          const errorData = await response.json()
+          errorMessage = errorData.error || errorData.message || errorMessage
+        } catch {
+          // If response is not JSON, use default message
+        }
+        
+        // Add retry info if available
+        if (retryAfter) {
+          errorMessage += ` Retry after ${retryAfter} seconds.`
+        }
+        
+        const rateLimitError = new Error(errorMessage) as any
+        rateLimitError.status = 429
+        rateLimitError.retryAfter = retryAfter
+        throw rateLimitError
+      }
+      
+      // Handle other HTTP errors
       let errorMessage = `Request failed with status ${response.status}`
       try {
         const errorData = await response.json()
@@ -86,7 +123,10 @@ async function request<T>(
         // If response is not JSON, use status text
         errorMessage = response.statusText || errorMessage
       }
-      throw new Error(errorMessage)
+      
+      const httpError = new Error(errorMessage) as any
+      httpError.status = response.status
+      throw httpError
     }
 
     const data: ApiResponse<T> = await response.json()
@@ -97,11 +137,20 @@ async function request<T>(
 
     return data.data as T
   } catch (error: any) {
+    // Clear timeout on error
+    clearTimeout(timeoutId)
+    
     // Handle network errors with more specific messages
-    if (error.name === 'AbortError' || error.name === 'TimeoutError') {
-      const errorMsg = `⏱️ Request timeout - The server at ${API_URL} is not responding. Please ensure the backend server is running on port 4000.`
-      console.error(errorMsg, { endpoint, url, timeout })
-      throw new Error(errorMsg)
+    if (error.name === 'AbortError' || error.name === 'TimeoutError' || error.message?.includes('timeout') || error.message?.includes('aborted')) {
+      const errorMsg = `⏱️ Request timeout (${timeout/1000}s) - The server at ${apiUrl} is not responding. 
+
+Troubleshooting:
+1. Check if backend is running: curl ${apiUrl}/health
+2. Backend might be slow - try again in a moment
+3. Check backend logs for errors
+4. Verify NEXT_PUBLIC_API_URL in .env.local: ${apiUrl}`
+      console.error(errorMsg, { endpoint, url, timeout, method })
+      throw new Error(`Request timeout after ${timeout/1000} seconds. The backend server may be slow or not responding.`)
     }
     
     // Handle fetch failures (network errors, CORS, etc.)
@@ -131,8 +180,26 @@ Environment: ${process.env.NODE_ENV}`
       throw new Error(`Cannot connect to backend server at ${apiUrl}. Make sure the server is running and NEXT_PUBLIC_API_URL is set correctly.`)
     }
     
-    // Re-throw other errors as-is
-    console.error('❌ API request error:', { endpoint, url, error: error.message, error })
+    // Handle rate limit errors specifically
+    if (error.status === 429 || error.message?.includes('Too many requests')) {
+      const retryAfter = error.retryAfter || 60 // Default to 60 seconds
+      console.warn(`⚠️ Rate limit exceeded. Retry after ${retryAfter} seconds.`, { endpoint, url })
+      throw new Error(`Rate limit exceeded. Please wait ${retryAfter} seconds before trying again.`)
+    }
+    
+    // Re-throw other errors with better context
+    if (error.message) {
+      console.error('❌ API request error:', { 
+        endpoint, 
+        url, 
+        method,
+        error: error.message, 
+        status: error.status,
+        stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+      })
+    } else {
+      console.error('❌ API request error (unknown):', { endpoint, url, method, error })
+    }
     throw error
   }
 }

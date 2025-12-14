@@ -13,11 +13,15 @@ const getKeyGenerator = (req: Request) => {
  */
 export const generalLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100, // 100 requests per 15 minutes
+  max: 200, // 200 requests per 15 minutes (increased for React Query refetching)
   message: { error: 'Too many requests, please try again later' },
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: getKeyGenerator,
+  skip: (req) => {
+    // Skip rate limiting for health checks
+    return req.path === '/health';
+  },
   // Use default in-memory store (no Redis store needed for MVP)
   // express-rate-limit has a built-in memory store that works perfectly
 });

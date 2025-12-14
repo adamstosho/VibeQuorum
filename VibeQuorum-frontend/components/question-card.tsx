@@ -30,16 +30,16 @@ export default function QuestionCard({
 }: QuestionCardProps) {
   return (
     <Link href={`/questions/${id}`}>
-      <div className="card-base space-y-3 hover:border-primary/50 hover:shadow-lg hover:shadow-primary/10 transition-all duration-300 cursor-pointer group">
-        <div className="flex items-start justify-between gap-4">
-          <div className="flex-1 space-y-2">
-            <div className="flex items-start gap-2">
-              <h3 className="font-semibold text-base group-hover:text-primary transition-colors duration-200 line-clamp-2">
+      <div className="card-base space-y-3 hover:border-primary/50 hover:shadow-lg hover:shadow-primary/10 transition-all duration-300 cursor-pointer group overflow-hidden">
+        <div className="flex items-start justify-between gap-4 min-w-0">
+          <div className="flex-1 space-y-2 min-w-0">
+            <div className="flex items-start gap-2 min-w-0">
+              <h3 className="font-semibold text-base group-hover:text-primary transition-colors duration-200 line-clamp-2 break-words flex-1 min-w-0">
                 {title}
               </h3>
               {acceptedAnswer && <CheckCircle className="h-4 w-4 text-success flex-shrink-0 mt-0.5 animate-pulse" />}
             </div>
-            <p className="text-sm text-muted-foreground line-clamp-2 group-hover:text-muted-foreground transition-colors duration-200">
+            <p className="text-sm text-muted-foreground line-clamp-2 group-hover:text-muted-foreground transition-colors duration-200 break-words">
               {excerpt}
             </p>
           </div>

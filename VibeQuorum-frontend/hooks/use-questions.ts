@@ -45,6 +45,12 @@ export function useQuestions(options?: {
           id: q._id || q.id,
         })) as Question[]
       } catch (err: any) {
+        // Handle rate limit errors gracefully
+        if (err.status === 429 || err.message?.includes('Rate limit')) {
+          console.warn('Rate limit exceeded for questions list. Using cached data if available.')
+          // Return empty array to prevent breaking, but don't log as error
+          return [] as Question[]
+        }
         console.error('Failed to fetch questions:', err)
         // Return empty array on error instead of throwing
         // This prevents the entire component from breaking
@@ -53,8 +59,14 @@ export function useQuestions(options?: {
     },
     staleTime: 30 * 1000, // 30 seconds
     gcTime: 5 * 60 * 1000, // 5 minutes (formerly cacheTime)
-    retry: 1, // Only retry once
-    retryDelay: 1000, // Wait 1 second before retry
+    retry: (failureCount, error: any) => {
+      // Don't retry on rate limit errors
+      if (error?.status === 429 || error?.message?.includes('Rate limit')) {
+        return false
+      }
+      return failureCount < 1 // Retry once for other errors
+    },
+    retryDelay: 2000, // Wait 2 seconds before retry
   })
 
   const refresh = useCallback(() => {
@@ -113,6 +125,11 @@ export function useQuestion(questionId: string | null) {
         }
         return null
       } catch (err: any) {
+        // Handle rate limit errors gracefully
+        if (err.status === 429 || err.message?.includes('Rate limit')) {
+          console.warn('Rate limit exceeded for question. Using cached data if available.')
+          return null
+        }
         console.error('Failed to fetch question:', err)
         return null
       }
@@ -120,8 +137,13 @@ export function useQuestion(questionId: string | null) {
     enabled: !!questionId,
     staleTime: 60 * 1000, // 1 minute
     gcTime: 10 * 60 * 1000, // 10 minutes
-    retry: 1,
-    retryDelay: 1000,
+    retry: (failureCount, error: any) => {
+      if (error?.status === 429 || error?.message?.includes('Rate limit')) {
+        return false
+      }
+      return failureCount < 1
+    },
+    retryDelay: 2000,
   })
 
   const refresh = useCallback(() => {
@@ -183,30 +205,47 @@ export function useAnswers(questionId: string | null) {
     queryKey: ['answers', questionId],
     queryFn: async () => {
       if (!questionId) return []
-      const results = await api.answers.list(questionId)
-      return (results?.answers || []).map((a: any) => {
-        // Handle txHashes - ensure it's always an array
-        let txHashes = []
-        if (Array.isArray(a.txHashes)) {
-          txHashes = a.txHashes
-        } else if (a.txHash) {
-          txHashes = [a.txHash]
-        } else if (typeof a.txHash === 'string' && a.txHash.length > 0) {
-          txHashes = [a.txHash]
+      try {
+        const results = await api.answers.list(questionId)
+        return (results?.answers || []).map((a: any) => {
+          // Handle txHashes - ensure it's always an array
+          let txHashes = []
+          if (Array.isArray(a.txHashes)) {
+            txHashes = a.txHashes
+          } else if (a.txHash) {
+            txHashes = [a.txHash]
+          } else if (typeof a.txHash === 'string' && a.txHash.length > 0) {
+            txHashes = [a.txHash]
+          }
+          
+          return {
+            ...a,
+            id: a._id || a.id,
+            questionId: a.questionId || questionId,
+            vibeReward: a.vibeReward || 0, // Ensure vibeReward is always a number
+            txHashes: txHashes, // Always an array
+          } as Answer
+        })
+      } catch (err: any) {
+        // Handle rate limit errors gracefully
+        if (err.status === 429 || err.message?.includes('Rate limit')) {
+          console.warn('Rate limit exceeded for answers. Using cached data if available.')
+          return []
         }
-        
-        return {
-          ...a,
-          id: a._id || a.id,
-          questionId: a.questionId || questionId,
-          vibeReward: a.vibeReward || 0, // Ensure vibeReward is always a number
-          txHashes: txHashes, // Always an array
-        } as Answer
-      })
+        console.error('Failed to fetch answers:', err)
+        return []
+      }
     },
     enabled: !!questionId,
     staleTime: 30 * 1000, // 30 seconds
     gcTime: 5 * 60 * 1000, // 5 minutes
+    retry: (failureCount, error: any) => {
+      if (error?.status === 429 || error?.message?.includes('Rate limit')) {
+        return false
+      }
+      return failureCount < 1
+    },
+    retryDelay: 2000,
   })
 
   const refresh = useCallback(() => {
