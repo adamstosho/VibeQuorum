@@ -20,25 +20,36 @@ export class AIService {
       this.openaiClient = null;
     }
 
-    // Path to ai_logs/prompts.md
-    this.promptLogPath = path.join(
-      __dirname,
-      '../../ai_logs/prompts.md'
-    );
+    // Check if we're in a serverless environment
+    const isServerless = process.env.VERCEL === '1' || process.env.AWS_LAMBDA_FUNCTION_NAME;
+    
+    if (isServerless) {
+      // In serverless, use /tmp directory (only writable location)
+      this.promptLogPath = path.join('/tmp', 'vibequorum-ai-prompts.md');
+    } else {
+      // In regular environment, use project directory
+      this.promptLogPath = path.join(
+        __dirname,
+        '../../ai_logs/prompts.md'
+      );
+    }
 
-    // Ensure directory exists
-    this.ensureLogDirectory();
+    // Ensure directory exists (only if not serverless)
+    if (!isServerless) {
+      this.ensureLogDirectory();
+    }
   }
 
   private ensureLogDirectory(): void {
-    const dir = path.dirname(this.promptLogPath);
-    if (!fs.existsSync(dir)) {
-      fs.mkdirSync(dir, { recursive: true });
-    }
+    try {
+      const dir = path.dirname(this.promptLogPath);
+      if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+      }
 
-    // Create prompts.md if it doesn't exist
-    if (!fs.existsSync(this.promptLogPath)) {
-      const header = `# VibeQuorum AI Prompt Logs
+      // Create prompts.md if it doesn't exist
+      if (!fs.existsSync(this.promptLogPath)) {
+        const header = `# VibeQuorum AI Prompt Logs
 
 This file documents all AI prompts and responses used in the VibeQuorum platform.
 
@@ -47,7 +58,13 @@ This file documents all AI prompts and responses used in the VibeQuorum platform
 ---
 
 `;
-      fs.writeFileSync(this.promptLogPath, header);
+        fs.writeFileSync(this.promptLogPath, header);
+      }
+    } catch (error: any) {
+      // If file system operations fail, log warning but don't throw
+      // This allows the service to continue functioning without file logging
+      logger.warn(`⚠️  Could not initialize AI log directory: ${error.message}`);
+      logger.warn('   AI logging to file will be disabled, but AI features will still work');
     }
   }
 
@@ -203,6 +220,7 @@ This file documents all AI prompts and responses used in the VibeQuorum platform
 
   /**
    * Append entry to ai_logs/prompts.md (HACKATHON REQUIREMENT)
+   * In serverless environments, this writes to /tmp (only writable location)
    */
   private appendToPromptsLog(entry: {
     questionId: string;
@@ -235,9 +253,26 @@ ${entry.response}
 `;
 
     try {
+      // Check if file exists, create header if it doesn't
+      if (!fs.existsSync(this.promptLogPath)) {
+        const header = `# VibeQuorum AI Prompt Logs
+
+This file documents all AI prompts and responses used in the VibeQuorum platform.
+
+**Format:** Each entry includes timestamp, model, question ID, prompt, and response.
+
+---
+
+`;
+        fs.writeFileSync(this.promptLogPath, header);
+      }
+      
       fs.appendFileSync(this.promptLogPath, logEntry);
     } catch (error: any) {
-      logger.error(`❌ Failed to append to prompts.md: ${error.message}`);
+      // Log error but don't throw - file logging is optional
+      // In serverless, this might fail if /tmp is full or permissions issue
+      logger.warn(`⚠️  Failed to append to prompts log: ${error.message}`);
+      logger.warn('   AI request succeeded, but file logging failed (non-critical)');
       // Don't throw - logging failure shouldn't break the request
     }
   }

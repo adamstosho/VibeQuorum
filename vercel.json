@@ -1,0 +1,38 @@
+{
+  "version": 2,
+  "builds": [
+    {
+      "src": "backend/api/index.ts",
+      "use": "@vercel/node"
+    }
+  ],
+  "routes": [
+    {
+      "src": "/api/(.*)",
+      "dest": "backend/api/index.ts"
+    },
+    {
+      "src": "/health",
+      "dest": "backend/api/index.ts"
+    },
+    {
+      "src": "/api-docs",
+      "dest": "backend/api/index.ts"
+    },
+    {
+      "src": "/api-docs/(.*)",
+      "dest": "backend/api/index.ts"
+    }
+  ],
+  "env": {
+    "NODE_ENV": "production"
+  },
+  "functions": {
+    "backend/api/index.ts": {
+      "maxDuration": 30,
+      "memory": 1024
+    }
+  },
+  "installCommand": "cd backend && npm install"
+}
+
