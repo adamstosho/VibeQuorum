@@ -61,23 +61,9 @@ export default async function handler(req: any, res: any): Promise<any> {
       await connectDatabase();
     }
 
-    // Handle the request using Express app
-    // Wrap in a promise to properly handle async operations
-    return new Promise((resolve, reject) => {
-      try {
-        app(req, res, (err?: any) => {
-          if (err) {
-            logger.error(`❌ Express middleware error: ${err.message}`);
-            reject(err);
-          } else {
-            resolve(undefined);
-          }
-        });
-      } catch (error: any) {
-        logger.error(`❌ Request handling error: ${error.message}`);
-        reject(error);
-      }
-    });
+    // Return the Express app handler
+    // Vercel's runtime will handle the request/response
+    return app(req, res);
   } catch (error: any) {
     logger.error(`❌ Serverless function error: ${error.message}`);
     if (error.stack) {
@@ -96,4 +82,3 @@ export default async function handler(req: any, res: any): Promise<any> {
     }
   }
 }
-
